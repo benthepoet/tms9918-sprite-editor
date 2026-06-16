@@ -36,25 +36,32 @@ class SpriteEditor:
         self.root.geometry("1300x750")
         
         self.sprite_size_mode = 16
-        self.num_sprites = 16
         self.current_sprite = 0
         self.current_color = 2
         
         self.sprites = []
-        self.init_sprites()
+        self.init_sprites(1)
         
         self.zoom = 20
         self.stack_enabled = tk.BooleanVar(value=True)
         self.stack_vars = []
         
         self.create_ui()
+        self.root.bind("<Control-Shift-C>", self._copy_asm_shortcut)
     
-    def init_sprites(self):
+    def init_sprites(self, count=1):
+        size = self.sprite_size_mode
         self.sprites = []
-        for _ in range(self.num_sprites):
-            size = self.sprite_size_mode
+        for _ in range(count):
             pattern = [[0 for _ in range(size)] for _ in range(size)]
             self.sprites.append({"pattern": pattern, "color": self.current_color})
+
+    def create_empty_sprite(self):
+        size = self.sprite_size_mode
+        return {
+            "pattern": [[0 for _ in range(size)] for _ in range(size)],
+            "color": self.current_color,
+        }
     
     def create_ui(self):
         menubar = tk.Menu(self.root)
@@ -66,7 +73,11 @@ class SpriteEditor:
         file_menu.add_command(label="Load Project", command=self.load_project)
         file_menu.add_command(label="Save Project", command=self.save_project)
         file_menu.add_separator()
-        file_menu.add_command(label="Copy Assembly to Clipboard", command=self.copy_asm)
+        file_menu.add_command(
+            label="Copy Assembly to Clipboard",
+            command=self.copy_asm,
+            accelerator="Ctrl+Shift+C",
+        )
         
         mode_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Mode", menu=mode_menu)
@@ -119,16 +130,16 @@ class SpriteEditor:
         self.sprite_list.pack(side=tk.LEFT)
         self.sprite_list.bind("<<ListboxSelect>>", self.select_sprite)
         
-        check_frame = ttk.Frame(list_frame)
-        check_frame.pack(side=tk.RIGHT, fill="y")
-        
+        self.check_frame = ttk.Frame(list_frame)
+        self.check_frame.pack(side=tk.RIGHT, fill="y")
+
         self.stack_vars = []
-        for i in range(self.num_sprites):
-            var = tk.BooleanVar(value=(i <= 1))  # default first two on
-            cb = ttk.Checkbutton(check_frame, variable=var, command=self.refresh_views)
-            cb.pack(anchor="w")
-            self.stack_vars.append(var)
-            self.sprite_list.insert(tk.END, f"Sprite {i:02d}")
+        self.rebuild_sprite_list()
+
+        sprite_btn_frame = ttk.Frame(right_frame)
+        sprite_btn_frame.pack(fill="x", pady=5)
+        ttk.Button(sprite_btn_frame, text="Add Sprite", command=self.add_sprite).pack(side=tk.LEFT, expand=True, fill="x", padx=(0, 3))
+        ttk.Button(sprite_btn_frame, text="Remove Sprite", command=self.remove_sprite).pack(side=tk.LEFT, expand=True, fill="x", padx=(3, 0))
         
         ttk.Checkbutton(right_frame, text="Enable Stacking (Canvas + Preview)", variable=self.stack_enabled, command=self.refresh_views).pack(anchor="w", pady=5)
         
@@ -166,20 +177,59 @@ class SpriteEditor:
     def set_mode(self, mode):
         if self.sprite_size_mode == mode: return
         if messagebox.askyesno("Change Mode", "This will clear all sprites. Continue?"):
+            count = max(1, len(self.sprites))
             self.sprite_size_mode = mode
-            self.init_sprites()
+            self.init_sprites(count)
             self.current_sprite = 0
             self.current_color = 2
-            self.update_sprite_list()
+            self.rebuild_sprite_list()
             self.refresh_views()
-    
-    def update_sprite_list(self):
+
+    def rebuild_sprite_list(self):
+        old_stack = [var.get() for var in self.stack_vars]
         self.sprite_list.delete(0, tk.END)
+        for child in self.check_frame.winfo_children():
+            child.destroy()
         self.stack_vars = []
-        for i in range(self.num_sprites):
-            var = tk.BooleanVar(value=(i <= 1))
+
+        if self.current_sprite >= len(self.sprites):
+            self.current_sprite = max(0, len(self.sprites) - 1)
+
+        for i in range(len(self.sprites)):
+            if i < len(old_stack):
+                stacked = old_stack[i]
+            elif len(self.sprites) == 1:
+                stacked = True
+            else:
+                stacked = i <= 1
+            var = tk.BooleanVar(value=stacked)
+            cb = ttk.Checkbutton(self.check_frame, variable=var, command=self.refresh_views)
+            cb.pack(anchor="w")
             self.stack_vars.append(var)
             self.sprite_list.insert(tk.END, f"Sprite {i:02d}")
+
+        if self.sprites:
+            self.sprite_list.selection_clear(0, tk.END)
+            self.sprite_list.selection_set(self.current_sprite)
+            self.sprite_list.activate(self.current_sprite)
+
+    def add_sprite(self):
+        self.sprites.append(self.create_empty_sprite())
+        self.current_sprite = len(self.sprites) - 1
+        self.rebuild_sprite_list()
+        self.refresh_views()
+
+    def remove_sprite(self):
+        if len(self.sprites) <= 1:
+            messagebox.showinfo("Remove Sprite", "At least one sprite is required.")
+            return
+        if not messagebox.askyesno("Remove Sprite", f"Remove Sprite {self.current_sprite:02d}?"):
+            return
+        del self.sprites[self.current_sprite]
+        if self.current_sprite >= len(self.sprites):
+            self.current_sprite = len(self.sprites) - 1
+        self.rebuild_sprite_list()
+        self.refresh_views()
     
     def get_stacked_sprites(self):
         stacked = [i for i, var in enumerate(self.stack_vars) if var.get()]
@@ -302,18 +352,20 @@ class SpriteEditor:
             self.refresh_views()
     
     def copy_to_next(self):
-        if self.current_sprite < self.num_sprites - 1:
+        if self.current_sprite < len(self.sprites) - 1:
             nxt = self.current_sprite + 1
             src = self.sprites[self.current_sprite]
             self.sprites[nxt] = {"pattern": [row[:] for row in src["pattern"]], "color": src["color"]}
             messagebox.showinfo("Copy", f"Copied to Sprite {nxt:02d}")
+        else:
+            messagebox.showinfo("Copy", "No next sprite. Use Add Sprite first.")
     
     def new_project(self):
         if messagebox.askyesno("New Project", "Clear everything?"):
-            self.init_sprites()
+            self.init_sprites(1)
             self.current_sprite = 0
             self.current_color = 2
-            self.update_sprite_list()
+            self.rebuild_sprite_list()
             self.refresh_views()
     
     def save_project(self):
@@ -331,9 +383,11 @@ class SpriteEditor:
                 data = json.load(f)
             self.sprite_size_mode = data["mode"]
             self.sprites = data["sprites"]
+            if not self.sprites:
+                self.init_sprites(1)
             self.current_sprite = 0
-            self.current_color = self.sprites[0]["color"] if self.sprites else 2
-            self.update_sprite_list()
+            self.current_color = self.sprites[0]["color"]
+            self.rebuild_sprite_list()
             self.refresh_views()
             messagebox.showinfo("Loaded", "Project loaded.")
     
@@ -384,6 +438,10 @@ class SpriteEditor:
         asm = self.build_asm_text()
         self.root.clipboard_clear()
         self.root.clipboard_append(asm)
+
+    def _copy_asm_shortcut(self, event=None):
+        self.copy_asm()
+        return "break"
 
 if __name__ == "__main__":
     root = tk.Tk()

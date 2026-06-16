@@ -8,7 +8,7 @@ Built with Python and Tkinter — no extra dependencies required.
 
 - **TI-99/4A palette** — All 16 system colors, including transparent
 - **8×8 and 16×16 modes** — Switch sprite size from the Mode menu (clears sprites)
-- **16 sprite slots** — Manage up to 16 independent sprites per project
+- **Dynamic sprite list** — Start with one sprite; add or remove slots as needed
 - **Stacked editing** — Overlay multiple sprites on the canvas and preview to compose layered graphics
 - **Project files** — Save and load work as JSON
 - **Export** — Copy assembly output to the clipboard for use in your programs
@@ -31,7 +31,7 @@ python3 src/sprite.py
 | **TI Palette** | Click a swatch to set the active color. `T` is transparent (erases pixels). |
 | **Drawing Canvas** | Main editing area. Shows stacked layers when stacking is enabled. |
 | **Assembly Export** | Live assembly output for the current sprite, updated as you edit. |
-| **Sprite Slots** | Select the active sprite. Checkboxes choose which sprites appear in the stack. |
+| **Sprite Slots** | Select the active sprite. Checkboxes choose which sprites appear in the stack. Use Add/Remove to manage slots. |
 | **Stacked Preview** | Live preview of the composed result. |
 | **Status bar** | Current sprite, size, color, and stacking state. |
 
@@ -49,6 +49,8 @@ python3 src/sprite.py
 
 - **Clear Sprite** — Reset the current sprite to empty
 - **Fill Sprite** — Fill the current sprite with the active color
+- **Add Sprite** — Append a new empty sprite slot
+- **Remove Sprite** — Delete the current sprite (at least one must remain)
 - **Copy to Next** — Duplicate the current sprite into the next slot
 
 ## File Menu
@@ -58,7 +60,7 @@ python3 src/sprite.py
 | **New** | Clear all sprites and start fresh |
 | **Load Project** | Open a `.json` project file |
 | **Save Project** | Save the current project as JSON |
-| **Copy Assembly to Clipboard** | Copy the assembly output for the current sprite |
+| **Copy Assembly to Clipboard** | Copy the assembly output for the current sprite (`Ctrl+Shift+C`) |
 
 ## Project Format
 
@@ -95,7 +97,7 @@ BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00   ; top-right
 BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00   ; bottom-right
 ```
 
-Assembly output is shown live below the canvas. Use **File → Copy Assembly to Clipboard** or select text directly from the panel.
+Assembly output is shown live below the canvas. Press **Ctrl+Shift+C** or use **File → Copy Assembly to Clipboard** to copy it. You can also select text directly from the panel.
 
 ## Stacking
 
