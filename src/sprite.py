@@ -66,8 +66,7 @@ class SpriteEditor:
         file_menu.add_command(label="Load Project", command=self.load_project)
         file_menu.add_command(label="Save Project", command=self.save_project)
         file_menu.add_separator()
-        file_menu.add_command(label="Export CALL CHAR (BASIC)", command=self.export_basic)
-        file_menu.add_command(label="Export Assembly DATA", command=self.export_asm)
+        file_menu.add_command(label="Copy Assembly to Clipboard", command=self.copy_asm)
         
         mode_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Mode", menu=mode_menu)
@@ -99,6 +98,13 @@ class SpriteEditor:
         self.canvas.bind("<B1-Motion>", self.draw_pixel)
         self.canvas.bind("<Button-3>", self.erase_pixel)
         self.canvas.bind("<B3-Motion>", self.erase_pixel)
+
+        asm_frame = ttk.LabelFrame(canvas_frame, text="Assembly Export")
+        asm_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+
+        self.asm_text = tk.Text(asm_frame, height=6, font=("Courier", 10), wrap=tk.NONE)
+        self.asm_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.asm_text.bind("<Key>", lambda e: "break")
         
         # Right Panel
         right_frame = ttk.Frame(main_frame)
@@ -140,6 +146,7 @@ class SpriteEditor:
         self.update_canvas()
         self.update_status()
         self.update_preview()
+        self.update_asm_export()
     
     def rgb_to_hex(self, rgb):
         return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
@@ -154,6 +161,7 @@ class SpriteEditor:
         self.update_canvas()
         self.update_preview()
         self.update_status()
+        self.update_asm_export()
     
     def set_mode(self, mode):
         if self.sprite_size_mode == mode: return
@@ -329,57 +337,51 @@ class SpriteEditor:
             self.refresh_views()
             messagebox.showinfo("Loaded", "Project loaded.")
     
-    def export_basic(self):
-        sprite_data = self.sprites[self.current_sprite]
+    def _pattern_row_byte(self, pattern, y, x0):
+        b = 0
+        for x in range(8):
+            if pattern[y][x0 + x]:
+                b |= (1 << (7 - x))
+        return b
+
+    def build_asm_text(self, sprite_index=None):
+        if sprite_index is None:
+            sprite_index = self.current_sprite
+
+        sprite_data = self.sprites[sprite_index]
         pattern = sprite_data["pattern"]
         size = self.sprite_size_mode
         col = sprite_data["color"]
+
+        bytes_list = []
         if size == 8:
-            hex_str = ""
             for y in range(8):
-                b = 0
-                for x in range(8):
-                    if pattern[y][x]:
-                        b |= (1 << (7 - x))
-                hex_str += f"{b:02X}"
-            txt = f'CALL CHAR(96,"{hex_str}")  # Sprite {self.current_sprite} Color {col}'
+                bytes_list.append(self._pattern_row_byte(pattern, y, 0))
         else:
-            txt = f"16x16 Sprite {self.current_sprite} (Color {col}):\n"
-            for y in range(16):
-                b1 = b2 = 0
-                for x in range(8):
-                    if pattern[y][x]: b1 |= (1 << (7-x))
-                    if pattern[y][x+8]: b2 |= (1 << (7-x))
-                txt += f"  {b1:02X}{b2:02X}\n"
-        messagebox.showinfo("BASIC Export", txt)
-        self.root.clipboard_clear()
-        self.root.clipboard_append(txt)
-    
-    def export_asm(self):
-        sprite_data = self.sprites[self.current_sprite]
-        pattern = sprite_data["pattern"]
-        size = self.sprite_size_mode
-        col = sprite_data["color"]
-        asm = f"; TI-99 Sprite {self.current_sprite} {size}x{size} Color {col}\n"
-        if size == 8:
-            asm += f"SP{self.current_sprite:02d} DATA "
+            # TMS9918 16x16 layout: top-left, bottom-left, top-right, bottom-right
             for y in range(8):
-                b = 0
-                for x in range(8):
-                    if pattern[y][x]:
-                        b |= (1 << (7 - x))
-                asm += f">{b:02X}"
-                if y < 7: asm += ","
-            asm += "\n"
-        else:
-            asm += "; 16x16 pattern (32 bytes)\n"
-            for y in range(16):
-                b1 = b2 = 0
-                for x in range(8):
-                    if pattern[y][x]: b1 |= (1 << (7-x))
-                    if pattern[y][x+8]: b2 |= (1 << (7-x))
-                asm += f"    DATA >{b1:02X},>{b2:02X}\n"
-        messagebox.showinfo("Assembly Export", asm)
+                bytes_list.append(self._pattern_row_byte(pattern, y, 0))
+            for y in range(8, 16):
+                bytes_list.append(self._pattern_row_byte(pattern, y, 0))
+            for y in range(8):
+                bytes_list.append(self._pattern_row_byte(pattern, y, 8))
+            for y in range(8, 16):
+                bytes_list.append(self._pattern_row_byte(pattern, y, 8))
+
+        asm = f"; TI-99 Sprite {sprite_index:02d} {size}x{size} Color {col}\n"
+        for i in range(0, len(bytes_list), 8):
+            chunk = bytes_list[i:i + 8]
+            hex_vals = ",".join(f">{b:02X}" for b in chunk)
+            asm += f"BYTE {hex_vals}\n"
+        return asm
+
+    def update_asm_export(self):
+        asm = self.build_asm_text()
+        self.asm_text.delete("1.0", tk.END)
+        self.asm_text.insert("1.0", asm)
+
+    def copy_asm(self):
+        asm = self.build_asm_text()
         self.root.clipboard_clear()
         self.root.clipboard_append(asm)
 
