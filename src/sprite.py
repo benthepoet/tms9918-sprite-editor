@@ -176,9 +176,38 @@ class SpriteEditor:
         self.asm_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.asm_text.bind("<Key>", lambda e: "break")
         
-        # Right Panel
-        right_frame = ttk.Frame(main_frame)
-        right_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        # Right Panel (vertically scrollable)
+        right_outer = ttk.Frame(main_frame)
+        right_outer.pack(side=tk.RIGHT, fill=tk.Y)
+
+        right_scrollbar = ttk.Scrollbar(right_outer, orient=tk.VERTICAL)
+        right_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self._right_scroll_canvas = tk.Canvas(
+            right_outer, highlightthickness=0, width=280
+        )
+        self._right_scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        right_scrollbar.config(command=self._right_scroll_canvas.yview)
+        self._right_scroll_canvas.config(yscrollcommand=right_scrollbar.set)
+
+        right_frame = ttk.Frame(self._right_scroll_canvas)
+        self._right_scroll_window = self._right_scroll_canvas.create_window(
+            (0, 0), window=right_frame, anchor=tk.NW
+        )
+
+        def _update_right_scroll_region(_event=None):
+            self._right_scroll_canvas.configure(
+                scrollregion=self._right_scroll_canvas.bbox("all")
+            )
+
+        def _resize_right_scroll_window(event):
+            self._right_scroll_canvas.itemconfig(
+                self._right_scroll_window, width=event.width
+            )
+
+        right_frame.bind("<Configure>", _update_right_scroll_region)
+        self._right_scroll_canvas.bind("<Configure>", _resize_right_scroll_window)
+        self._bind_right_panel_scroll(right_outer)
         
         ttk.Label(right_frame, text="Sprite Slots (check to stack)").pack(anchor="w")
         
@@ -303,6 +332,40 @@ class SpriteEditor:
         self.update_status()
         self.update_preview()
         self.update_asm_export()
+
+    def _bind_right_panel_scroll(self, *widgets):
+        canvas = self._right_scroll_canvas
+
+        def _scroll(delta):
+            if delta:
+                canvas.yview_scroll(delta, "units")
+
+        def _on_mousewheel(event):
+            if event.delta:
+                _scroll(int(-1 * (event.delta / 120)))
+            return "break"
+
+        def _on_mousewheel_up(_event):
+            _scroll(-1)
+            return "break"
+
+        def _on_mousewheel_down(_event):
+            _scroll(1)
+            return "break"
+
+        def _bind_scroll(_event=None):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            canvas.bind_all("<Button-4>", _on_mousewheel_up)
+            canvas.bind_all("<Button-5>", _on_mousewheel_down)
+
+        def _unbind_scroll(_event=None):
+            canvas.unbind_all("<MouseWheel>")
+            canvas.unbind_all("<Button-4>")
+            canvas.unbind_all("<Button-5>")
+
+        for widget in widgets:
+            widget.bind("<Enter>", _bind_scroll)
+            widget.bind("<Leave>", _unbind_scroll)
     
     def rgb_to_hex(self, rgb):
         return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
