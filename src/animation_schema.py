@@ -33,6 +33,27 @@ def deep_copy_frame(frame: dict) -> dict:
     }
 
 
+def frames_equal(left: dict, right: dict) -> bool:
+    if left.get("duration") != right.get("duration"):
+        return False
+    if left.get("stack_enabled") != right.get("stack_enabled"):
+        return False
+    if left.get("stack_mask") != right.get("stack_mask"):
+        return False
+    left_sprites = left.get("sprites", [])
+    right_sprites = right.get("sprites", [])
+    if len(left_sprites) != len(right_sprites):
+        return False
+    for left_sprite, right_sprite in zip(left_sprites, right_sprites):
+        if left_sprite.get("color") != right_sprite.get("color"):
+            return False
+        left_pattern = left_sprite.get("pattern", [])
+        right_pattern = right_sprite.get("pattern", [])
+        if left_pattern != right_pattern:
+            return False
+    return True
+
+
 def create_empty_sprite_dict(size: int, color: int = 2) -> dict:
     return {
         "pattern": [[0 for _ in range(size)] for _ in range(size)],

@@ -10,6 +10,7 @@ import tkinter as tk
 from animation_schema import (
     deep_copy_frame,
     deep_copy_sprite,
+    frames_equal,
     normalize_frame_slots,
     validate_and_sanitize_animations,
     validate_frame,
@@ -62,6 +63,13 @@ class AnimationSchemaTests(unittest.TestCase):
         copy = deep_copy_frame(frame)
         copy["sprites"][0]["pattern"][0][0] = 0
         self.assertEqual(frame["sprites"][0]["pattern"][0][0], 1)
+
+    def test_frames_equal_detects_sprite_changes(self):
+        left = make_frame()
+        right = deep_copy_frame(left)
+        self.assertTrue(frames_equal(left, right))
+        right["sprites"][0]["pattern"][0][0] = 0
+        self.assertFalse(frames_equal(left, right))
 
     def test_validate_and_sanitize_drops_invalid_frame(self):
         anims = [{"name": "test", "loop": True, "frames": [make_frame(), {"duration": 0}]}]

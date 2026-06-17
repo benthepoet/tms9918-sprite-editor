@@ -25,7 +25,7 @@ class AsmExportTests(unittest.TestCase):
 
     def test_build_asm_for_sprite_data_matches_legacy_shape(self):
         asm = self.editor._build_asm_for_sprite_data(self.editor.sprites[0], 0)
-        self.assertIn("; TI-99 Sprite 00 8x8 Color", asm)
+        self.assertIn("; TMS9918 Sprite 00 8x8 Color", asm)
         self.assertIn("BYTE >80", asm)
 
     def test_build_animation_asm_includes_timing_and_stacked_slots_only(self):
@@ -39,8 +39,8 @@ class AsmExportTests(unittest.TestCase):
         self.assertIn("; Frame 0: duration=4 screen frames", asm)
         self.assertIn("; Durations (screen frames): 4, 8", asm)
         self.assertIn("Total cycle: 12 screen frames", asm)
-        self.assertEqual(asm.count("; TI-99 Sprite 00"), 2)
-        self.assertNotIn("; TI-99 Sprite 01", asm)
+        self.assertEqual(asm.count("; TMS9918 Sprite 00"), 2)
+        self.assertNotIn("; TMS9918 Sprite 01", asm)
 
     def test_build_animation_asm_includes_all_stacked_sprites_per_frame(self):
         frame = make_frame(slots=2, duration=4)
@@ -50,8 +50,8 @@ class AsmExportTests(unittest.TestCase):
             {"name": "stacked", "loop": True, "frames": [frame]}
         ]
         asm = self.editor.build_animation_asm(0)
-        self.assertIn("; TI-99 Sprite 00", asm)
-        self.assertIn("; TI-99 Sprite 01", asm)
+        self.assertIn("; TMS9918 Sprite 00", asm)
+        self.assertIn("; TMS9918 Sprite 01", asm)
 
     def test_panel_text_includes_all_stacked_sprites_in_frame_edit(self):
         frame = make_frame(slots=2, duration=6)
@@ -64,8 +64,8 @@ class AsmExportTests(unittest.TestCase):
         self.editor.select_anim_frame(0)
         text = self.editor._build_asm_panel_text()
         self.assertIn("; Animation 'walk' / Frame 0", text)
-        self.assertIn("; TI-99 Sprite 00", text)
-        self.assertIn("; TI-99 Sprite 01", text)
+        self.assertIn("; TMS9918 Sprite 00", text)
+        self.assertIn("; TMS9918 Sprite 01", text)
 
     def test_panel_text_includes_all_stacked_sprites_in_preview(self):
         frame = make_frame(slots=2, duration=4)
@@ -78,8 +78,8 @@ class AsmExportTests(unittest.TestCase):
         self.editor._anim_preview_index = 0
         text = self.editor._build_asm_panel_text()
         self.assertTrue(text.startswith("; Preview frame 1/1\n"))
-        self.assertIn("; TI-99 Sprite 00", text)
-        self.assertIn("; TI-99 Sprite 01", text)
+        self.assertIn("; TMS9918 Sprite 00", text)
+        self.assertIn("; TMS9918 Sprite 01", text)
 
     def test_panel_text_adds_animation_header_in_static_mode(self):
         self.editor.current_animation = 0

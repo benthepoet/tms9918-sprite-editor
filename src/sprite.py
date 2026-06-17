@@ -8,15 +8,19 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from animation_schema import (
     MAX_FILE_BYTES_WARN,
     MAX_FRAMES_PER_ANIM,
+    create_empty_sprite_dict,
     deep_copy_animation,
     deep_copy_frame,
     deep_copy_sprite,
     deep_copy_sprites,
+    frames_equal,
     normalize_frame_slots,
     validate_and_sanitize_animations,
 )
 
-# TI-99/4A Colors (approximate RGB for display)
+APP_NAME = "TMS9918 Sprite Editor"
+
+# TMS9918 VDP colors (approximate RGB for display)
 TI_COLORS = [
     (0, 0, 0),      # 0 Transparent / Black
     (0, 0, 0),      # 1 Black
@@ -51,7 +55,7 @@ if os.environ.get("SPRITE_EDITOR_DEBUG"):
 class SpriteEditor:
     def __init__(self, root, create_ui=True):
         self.root = root
-        self.root.title("TI-99/4A Sprite Editor - Stacked Editing")
+        self.root.title(APP_NAME)
         self.root.geometry("1300x900")
 
         self.sprite_size_mode = 16
@@ -78,7 +82,6 @@ class SpriteEditor:
         self._static_stack_mask = None
         self._static_stack_enabled = None
         self._preview_return_to_frame_edit = False
-        self.mirror_preview_on_canvas = tk.BooleanVar(value=True)
         self._preview_fps_ticks = 0
         self._preview_fps_window_start = 0.0
         self._suppress_anim_ui_events = False
@@ -147,7 +150,7 @@ class SpriteEditor:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Left: Palette
-        palette_frame = ttk.LabelFrame(main_frame, text="TI Palette (T=Transparent)")
+        palette_frame = ttk.LabelFrame(main_frame, text="TMS9918 Palette (T=Transparent)")
         palette_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
         
         for i in range(16):
@@ -197,7 +200,7 @@ class SpriteEditor:
         right_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self._right_scroll_canvas = tk.Canvas(
-            right_outer, highlightthickness=0, width=280
+            right_outer, highlightthickness=0, width=320
         )
         self._right_scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         right_scrollbar.config(command=self._right_scroll_canvas.yview)
@@ -225,7 +228,7 @@ class SpriteEditor:
         self.sprite_slots_label = ttk.Label(
             right_frame, text="Sprite Slots (check to stack)"
         )
-        self.sprite_slots_label.pack(anchor="w")
+        self.sprite_slots_label.pack(anchor="w", padx=5)
         
         list_frame = ttk.Frame(right_frame)
         list_frame.pack(pady=5, fill="x")
@@ -247,15 +250,11 @@ class SpriteEditor:
         
         self.stack_enabled_checkbox = ttk.Checkbutton(
             right_frame,
-            text="Enable Stacking (Canvas + Preview)",
+            text="Enable Stacking",
             variable=self.stack_enabled,
             command=self._on_stack_enabled_changed_static,
         )
         self.stack_enabled_checkbox.pack(anchor="w", pady=5)
-        
-        ttk.Label(right_frame, text="Stacked Preview").pack(anchor="w")
-        self.preview_canvas = tk.Canvas(right_frame, bg="#777777", width=160, height=160)
-        self.preview_canvas.pack(pady=5)
         
         ttk.Button(right_frame, text="Clear Sprite", command=self.clear_current).pack(pady=5, fill="x")
         ttk.Button(right_frame, text="Fill Sprite", command=self.fill_sprite).pack(pady=5, fill="x")
@@ -297,6 +296,19 @@ class SpriteEditor:
             side=tk.LEFT, padx=(2, 0)
         )
 
+        frame_edit_row = ttk.Frame(anim_panel)
+        frame_edit_row.pack(fill="x", padx=5, pady=(0, 5))
+        self.anim_commit_btn = ttk.Button(
+            frame_edit_row, text="Commit Frame", command=self.commit_anim_frame_edits
+        )
+        self.anim_commit_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(0, 2))
+        self.anim_discard_btn = ttk.Button(
+            frame_edit_row, text="Discard Changes", command=self.discard_anim_frame_edits
+        )
+        self.anim_discard_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(2, 0))
+        self.anim_frame_dirty_label = ttk.Label(anim_panel, text="")
+        self.anim_frame_dirty_label.pack(anchor="w", padx=5, pady=(0, 5))
+
         props_row = ttk.Frame(anim_panel)
         props_row.pack(fill="x", padx=5, pady=5)
         ttk.Label(props_row, text="Duration (sf):").pack(side=tk.LEFT)
@@ -326,16 +338,11 @@ class SpriteEditor:
         self.anim_play_btn = ttk.Button(
             preview_btn_row, text="▶ Play", command=self.start_anim_preview
         )
-        self.anim_play_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(0, 2))
+        self.anim_play_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(8, 2))
         self.anim_stop_btn = ttk.Button(
             preview_btn_row, text="■ Stop", command=self.stop_anim_preview
         )
-        self.anim_stop_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(2, 0))
-        ttk.Checkbutton(
-            preview_frame,
-            text="Mirror on canvas",
-            variable=self.mirror_preview_on_canvas,
-        ).pack(anchor="w", padx=2)
+        self.anim_stop_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(2, 8))
         self.anim_preview_status = ttk.Label(preview_frame, text="")
         self.anim_preview_status.pack(anchor="w", padx=2, pady=2)
 
@@ -346,7 +353,6 @@ class SpriteEditor:
         
         self.update_canvas()
         self.update_status()
-        self.update_preview()
         self.update_asm_export()
 
     def _bind_right_panel_scroll(self, *widgets):
@@ -402,7 +408,6 @@ class SpriteEditor:
         if not hasattr(self, "canvas") or self.anim_preview_running:
             return
         self.update_canvas()
-        self.update_preview()
         self.update_status()
         self.update_asm_export()
     
@@ -533,20 +538,7 @@ class SpriteEditor:
     def _apply_anim_frame_for_preview(self, index: int):
         frame = self.animations[self.current_animation]["frames"][index]
         self._anim_preview_index = index
-        if hasattr(self, "preview_canvas"):
-            self.preview_canvas.delete("all")
-            self._render_composite(
-                self.preview_canvas,
-                frame["sprites"],
-                frame["stack_enabled"],
-                frame["stack_mask"],
-                self.current_sprite,
-                pixel_size=160 // self.sprite_size_mode,
-                draw_off_pixels=False,
-                transparent_color="#000000",
-                outline="",
-            )
-        if self.mirror_preview_on_canvas.get() and hasattr(self, "canvas"):
+        if hasattr(self, "canvas"):
             size = self.sprite_size_mode
             ps = self.zoom
             self.canvas.delete("all")
@@ -779,19 +771,37 @@ class SpriteEditor:
             mask[self.current_sprite] = True
         return mask
 
+    def _capture_sprites_for_frame(self, sprites, stack_enabled, stack_mask):
+        size = self.sprite_size_mode
+        captured = []
+        for index, sprite in enumerate(sprites):
+            include = False
+            if stack_enabled:
+                include = index < len(stack_mask) and stack_mask[index]
+            elif index == self.current_sprite:
+                include = True
+            if include:
+                captured.append(deep_copy_sprite(sprite))
+            else:
+                captured.append(create_empty_sprite_dict(size, self.current_color))
+        return captured
+
     def _capture_current_state_as_frame(self, duration=4):
         if self.anim_edit_mode and self._frame_edit_snapshot is not None:
-            return {
-                "duration": duration,
-                "stack_enabled": self._frame_edit_snapshot["stack_enabled"],
-                "stack_mask": self._frame_edit_snapshot["stack_mask"][:],
-                "sprites": deep_copy_sprites(self._frame_edit_snapshot["sprites"]),
-            }
+            stack_enabled = self._frame_edit_snapshot["stack_enabled"]
+            stack_mask = self._frame_edit_snapshot["stack_mask"][:]
+            sprites = self._frame_edit_snapshot["sprites"]
+        else:
+            stack_enabled = self.stack_enabled.get()
+            stack_mask = self._capture_stack_mask()
+            sprites = self.sprites
         return {
             "duration": duration,
-            "stack_enabled": self.stack_enabled.get(),
-            "stack_mask": self._capture_stack_mask(),
-            "sprites": deep_copy_sprites(self.sprites),
+            "stack_enabled": stack_enabled,
+            "stack_mask": stack_mask,
+            "sprites": self._capture_sprites_for_frame(
+                sprites, stack_enabled, stack_mask
+            ),
         }
 
     def _unique_animation_name(self, base):
@@ -916,8 +926,8 @@ class SpriteEditor:
         new_index = index + direction
         if new_index < 0 or new_index >= len(frames):
             return
-        if self.anim_edit_mode:
-            self.commit_anim_frame()
+        if self.anim_edit_mode and not self._try_leave_current_frame_edit("moving this frame"):
+            return
         frames[index], frames[new_index] = frames[new_index], frames[index]
         self.current_anim_frame = new_index
         if self.anim_edit_mode:
@@ -925,18 +935,90 @@ class SpriteEditor:
         else:
             self._refresh_animation_ui()
 
+    def _committed_anim_frame(self):
+        if self.current_animation is None:
+            return None
+        anim = self._current_animation()
+        frames = anim.get("frames", [])
+        if not frames or self.current_anim_frame >= len(frames):
+            return None
+        return frames[self.current_anim_frame]
+
+    def _frame_edit_is_dirty(self):
+        if not self.anim_edit_mode or self._frame_edit_snapshot is None:
+            return False
+        committed = self._committed_anim_frame()
+        if committed is None:
+            return False
+        return not frames_equal(self._frame_edit_snapshot, committed)
+
+    def _try_leave_current_frame_edit(self, action: str) -> bool:
+        if not self._frame_edit_is_dirty():
+            return True
+        result = messagebox.askyesnocancel(
+            "Unsaved Frame Changes",
+            f"Save changes to frame {self.current_anim_frame} before {action}?",
+        )
+        if result is None:
+            return False
+        if result:
+            return self.commit_anim_frame()
+        return True
+
     def commit_anim_frame(self):
         if not self.anim_edit_mode or self._frame_edit_snapshot is None:
-            return
+            return True
         if self.current_animation is None:
-            return
+            return True
         duration = self._frame_edit_snapshot.get("duration", 4)
         if not (1 <= duration <= 255):
             messagebox.showerror("Invalid Duration", "Duration must be 1–255 screen frames.")
-            return
+            return False
         self.animations[self.current_animation]["frames"][self.current_anim_frame] = (
             deep_copy_frame(self._frame_edit_snapshot)
         )
+        self._update_frame_edit_controls()
+        return True
+
+    def commit_anim_frame_edits(self):
+        if self.commit_anim_frame():
+            self.refresh_views()
+
+    def discard_anim_frame_edits(self):
+        if not self.anim_edit_mode or not self._frame_edit_is_dirty():
+            return
+        if self.current_animation is None:
+            return
+        committed = self._committed_anim_frame()
+        if committed is None:
+            return
+        self._frame_edit_snapshot = normalize_frame_slots(
+            deep_copy_frame(committed),
+            len(self.sprites),
+            self.sprite_size_mode,
+            self.current_color,
+        )
+        self.stack_enabled.set(self._frame_edit_snapshot["stack_enabled"])
+        self.rebuild_sprite_list(
+            source="frame", mask=self._frame_edit_snapshot["stack_mask"]
+        )
+        self._sync_animation_panel_from_snapshot()
+        self.refresh_views()
+
+    def _update_frame_edit_controls(self):
+        if not hasattr(self, "anim_commit_btn"):
+            return
+        dirty = self._frame_edit_is_dirty()
+        in_edit = self.anim_edit_mode
+        state = tk.NORMAL if in_edit and dirty else tk.DISABLED
+        self.anim_commit_btn.config(state=state)
+        self.anim_discard_btn.config(state=state)
+        if not in_edit:
+            self.anim_frame_dirty_label.config(text="")
+        elif dirty:
+            self.anim_frame_dirty_label.config(text="Unsaved changes")
+        else:
+            self.anim_frame_dirty_label.config(text="All changes saved")
 
     def select_anim_frame(self, index):
         if self.anim_preview_running:
@@ -952,8 +1034,13 @@ class SpriteEditor:
             and index == self.current_anim_frame
         ):
             return
-        if self.anim_edit_mode and self._frame_edit_snapshot is not None:
-            self.commit_anim_frame()
+        if (
+            self.anim_edit_mode
+            and self._frame_edit_snapshot is not None
+            and index != self.current_anim_frame
+            and not self._try_leave_current_frame_edit("switching frames")
+        ):
+            return
         if self._static_stack_mask is None:
             self._static_stack_mask = [v.get() for v in self.stack_vars]
             self._static_stack_enabled = self.stack_enabled.get()
@@ -988,8 +1075,9 @@ class SpriteEditor:
         self.refresh_views()
 
     def exit_animation_mode(self, commit=True):
-        if commit and self.anim_edit_mode:
-            self.commit_anim_frame()
+        if self.anim_edit_mode and self._frame_edit_is_dirty():
+            if not self._try_leave_current_frame_edit("exiting frame edit"):
+                return
         self._leave_anim_frame_edit()
 
     def cancel_animation_mode(self):
@@ -1277,10 +1365,10 @@ class SpriteEditor:
             duration = 4
             if self._frame_edit_snapshot is not None:
                 duration = self._frame_edit_snapshot.get("duration", 4)
+            dirty_suffix = " — unsaved changes" if self._frame_edit_is_dirty() else ""
             text = (
                 f"  FRAME EDIT — '{anim_name}' frame {self.current_anim_frame} "
-                f"({duration} screen frames) — "
-                f"Escape: discard  |  Animation → Exit: commit"
+                f"({duration} screen frames){dirty_suffix}"
             )
             bg, fg = "#b45309", "#ffffff"
             canvas_title = "Drawing Canvas — editing animation frame"
@@ -1320,22 +1408,8 @@ class SpriteEditor:
             anim = self.animations[self.current_animation]
             txt += f" | ANIM: {anim['name']} ({len(anim['frames'])} frames)"
         self.status.config(text=txt)
+        self._update_frame_edit_controls()
         self._update_edit_mode_indicator()
-    
-    def update_preview(self):
-        self.preview_canvas.delete("all")
-        sprites, stack_enabled, stack_mask = self._get_active_sprite_state()
-        self._render_composite(
-            self.preview_canvas,
-            sprites,
-            stack_enabled,
-            stack_mask,
-            self.current_sprite,
-            pixel_size=160 // self.sprite_size_mode,
-            draw_off_pixels=False,
-            transparent_color="#000000",
-            outline="",
-        )
     
     def clear_current(self):
         if self.anim_preview_running:
@@ -1480,7 +1554,7 @@ class SpriteEditor:
         col = sprite["color"]
         size = self.sprite_size_mode
         bytes_list = self._pattern_to_bytes(pattern, size)
-        asm = f"; TI-99 Sprite {slot_index:02d} {size}x{size} Color {col}\n"
+        asm = f"; TMS9918 Sprite {slot_index:02d} {size}x{size} Color {col}\n"
         for i in range(0, len(bytes_list), 8):
             chunk = bytes_list[i:i + 8]
             hex_vals = ",".join(f">{b:02X}" for b in chunk)
