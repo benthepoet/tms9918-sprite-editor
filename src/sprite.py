@@ -69,6 +69,11 @@ VDP_FRAME_SEC = 1.0 / 59.94
 CANVAS_BG = "#777777"
 CANVAS_GRID_OUTLINE = "#555555"
 CANVAS_OFF_PIXEL = "#555555"
+STATIC_APP_BG = "#E8F5E9"
+STATIC_MODE_INDICATOR_BG = "#43A047"
+STATIC_BUTTON_BORDER = "#A5D6A7"
+STATIC_BUTTON_LIGHT = "#F1F8F2"
+STATIC_BUTTON_DARK = "#81C784"
 ANIM_EDIT_APP_BG = "#fff7ed"
 ANIM_PREVIEW_APP_BG = "#eef4ff"
 PANEL_TEXT_BG = "#ffffff"
@@ -78,6 +83,11 @@ DIRTY_LABEL_BG = "#fef08a"
 DIRTY_LABEL_FG = "#713f12"
 SAVED_LABEL_BG = "#bbf7d0"
 SAVED_LABEL_FG = "#14532d"
+FRAME_STATUS_ROW_HEIGHT = 26
+PREVIEW_STATUS_ROW_HEIGHT = FRAME_STATUS_ROW_HEIGHT
+BUTTON_DISABLED_BG = "#e5e7eb"
+BUTTON_DISABLED_FG = "#9ca3af"
+BUTTON_DISABLED_BORDER = "#d1d5db"
 
 if os.environ.get("SPRITE_EDITOR_DEBUG"):
     logging.basicConfig(level=logging.DEBUG)
@@ -218,36 +228,18 @@ class SpriteEditor:
         self._ui_style = ttk.Style()
         if "clam" in self._ui_style.theme_names():
             self._ui_style.theme_use("clam")
-        try:
-            self._static_app_bg = self._ui_style.lookup("TFrame", "background") or "#f0f0f0"
-            self._default_label_bg = (
-                self._ui_style.lookup("TLabel", "background") or self._static_app_bg
-            )
-            self._default_button_bg = (
-                self._ui_style.lookup("TButton", "background") or self._static_app_bg
-            )
-            self._default_button_bordercolor = (
-                self._ui_style.lookup("TButton", "bordercolor") or "#9e9a91"
-            )
-            self._default_button_lightcolor = (
-                self._ui_style.lookup("TButton", "lightcolor") or "#eeebe7"
-            )
-            self._default_button_darkcolor = (
-                self._ui_style.lookup("TButton", "darkcolor") or "#cfcdc8"
-            )
-        except tk.TclError:
-            self._static_app_bg = "#f0f0f0"
-            self._default_label_bg = "#f0f0f0"
-            self._default_button_bg = "#f0f0f0"
-            self._default_button_bordercolor = "#9e9a91"
-            self._default_button_lightcolor = "#eeebe7"
-            self._default_button_darkcolor = "#cfcdc8"
+        self._static_app_bg = STATIC_APP_BG
+        self._default_label_bg = STATIC_APP_BG
+        self._default_button_bg = STATIC_APP_BG
+        self._default_button_bordercolor = STATIC_BUTTON_BORDER
+        self._default_button_lightcolor = STATIC_BUTTON_LIGHT
+        self._default_button_darkcolor = STATIC_BUTTON_DARK
 
         self._main_frame = tk.Frame(self.root, bg=self._static_app_bg)
         self._main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         self._left_outer = tk.Frame(self._main_frame, bg=self._static_app_bg, width=300)
-        self._left_outer.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        self._left_outer.pack(side=tk.LEFT, fill=tk.Y)
         self._left_outer.pack_propagate(False)
 
         palette_frame = ttk.LabelFrame(
@@ -450,18 +442,20 @@ class SpriteEditor:
 
         anim_btn_row = ttk.Frame(anim_top)
         anim_btn_row.pack(fill="x", pady=(5, 0))
-        ttk.Button(anim_btn_row, text="+", width=3, command=self.create_animation).pack(
-            side=tk.LEFT
+        anim_btn_row.columnconfigure(2, weight=1, uniform="anim_actions")
+        anim_btn_row.columnconfigure(3, weight=1, uniform="anim_actions")
+        ttk.Button(anim_btn_row, text="+", width=3, command=self.create_animation).grid(
+            row=0, column=0, sticky="ew"
         )
-        ttk.Button(anim_btn_row, text="−", width=3, command=self.delete_animation).pack(
-            side=tk.LEFT, padx=(2, 0)
+        ttk.Button(anim_btn_row, text="−", width=3, command=self.delete_animation).grid(
+            row=0, column=1, sticky="ew", padx=(2, 0)
         )
         ttk.Button(
             anim_btn_row, text="Duplicate", command=self.duplicate_animation
-        ).pack(side=tk.LEFT, expand=True, fill="x", padx=(4, 2))
+        ).grid(row=0, column=2, sticky="ew", padx=(4, 2))
         ttk.Button(
             anim_btn_row, text="Rename", command=self.rename_animation_dialog
-        ).pack(side=tk.LEFT, expand=True, fill="x", padx=(2, 0))
+        ).grid(row=0, column=3, sticky="ew", padx=(2, 0))
 
         ttk.Label(anim_panel, text="Frames").pack(anchor="w", padx=5)
         frame_list_row = ttk.Frame(anim_panel)
@@ -484,8 +478,16 @@ class SpriteEditor:
 
         frame_btn_row = ttk.Frame(anim_panel)
         frame_btn_row.pack(fill="x", padx=5, pady=5)
+        frame_btn_row.columnconfigure(0, weight=1, uniform="frame_actions")
+        frame_btn_row.columnconfigure(1, weight=1, uniform="frame_actions")
+        ttk.Button(frame_btn_row, text="+ Frame", command=self.add_anim_frame).grid(
+            row=0, column=0, sticky="ew", padx=(0, 2)
+        )
+        ttk.Button(frame_btn_row, text="− Frame", command=self.delete_anim_frame).grid(
+            row=0, column=1, sticky="ew", padx=(2, 4)
+        )
         frame_order_controls = ttk.Frame(frame_btn_row)
-        frame_order_controls.pack(side=tk.RIGHT)
+        frame_order_controls.grid(row=0, column=2, sticky="e")
         ttk.Button(
             frame_order_controls,
             text="↑",
@@ -498,12 +500,6 @@ class SpriteEditor:
             width=2,
             command=lambda: self.move_anim_frame(1),
         ).pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Button(frame_btn_row, text="+ Frame", command=self.add_anim_frame).pack(
-            side=tk.LEFT, expand=True, fill="x", padx=(0, 2)
-        )
-        ttk.Button(frame_btn_row, text="− Frame", command=self.delete_anim_frame).pack(
-            side=tk.LEFT, expand=True, fill="x", padx=(2, 4)
-        )
 
         frame_edit_row = ttk.Frame(anim_panel)
         frame_edit_row.pack(fill="x", padx=5, pady=(0, 5))
@@ -515,11 +511,18 @@ class SpriteEditor:
             frame_edit_row, text="Discard Changes", command=self.discard_anim_frame_edits
         )
         self.anim_discard_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(2, 0))
-        self.anim_frame_dirty_label = ttk.Label(anim_panel, text="")
-        self.anim_frame_dirty_label.pack(anchor="w", padx=5, pady=(0, 5))
+        self._anim_frame_status_row = tk.Frame(
+            anim_panel, height=FRAME_STATUS_ROW_HEIGHT
+        )
+        self._anim_frame_status_row.pack(fill="x", padx=5, pady=(0, 5))
+        self._anim_frame_status_row.pack_propagate(False)
+        self.anim_frame_dirty_label = ttk.Label(
+            self._anim_frame_status_row, text="", anchor="center"
+        )
+        self.anim_frame_dirty_label.pack(fill="both", expand=True)
 
         props_row = ttk.Frame(anim_panel)
-        props_row.pack(fill="x", padx=5, pady=5)
+        props_row.pack(fill="x", padx=5, pady=(0, 5))
         ttk.Label(props_row, text="Duration (sf):").pack(side=tk.LEFT)
         self.anim_duration_var = tk.IntVar(value=4)
         self.anim_duration_spin = ttk.Spinbox(
@@ -530,16 +533,16 @@ class SpriteEditor:
             textvariable=self.anim_duration_var,
             command=self._on_duration_changed,
         )
-        self.anim_duration_spin.pack(side=tk.LEFT, padx=5)
+        self.anim_duration_spin.pack(side=tk.LEFT, padx=(4, 0))
         self.anim_duration_var.trace_add("write", self._on_duration_var_changed)
 
         self.anim_loop_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            anim_panel,
-            text="Loop animation",
+            props_row,
+            text="Loop",
             variable=self.anim_loop_var,
             command=self._on_loop_changed,
-        ).pack(anchor="w", padx=5, pady=(0, 5))
+        ).pack(side=tk.RIGHT)
 
         preview_frame = ttk.LabelFrame(anim_panel, text="Preview", padding=(6, 4))
         preview_frame.pack(fill="x", padx=5, pady=(5, 8))
@@ -553,8 +556,13 @@ class SpriteEditor:
             preview_btn_row, text="■ Stop", command=self.stop_anim_preview
         )
         self.anim_stop_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(2, 0))
-        self.anim_preview_status = ttk.Label(preview_frame, text="")
-        self.anim_preview_status.pack(fill="x", anchor="w", pady=(0, 2))
+        self._anim_preview_status_row = tk.Frame(
+            preview_frame, height=PREVIEW_STATUS_ROW_HEIGHT
+        )
+        self._anim_preview_status_row.pack(fill="x", pady=(0, 2))
+        self._anim_preview_status_row.pack_propagate(False)
+        self.anim_preview_status = ttk.Label(self._anim_preview_status_row, text="")
+        self.anim_preview_status.pack(fill="both", expand=True, anchor="w")
 
         self._bind_anim_frame_list_scroll(self._right_outer, anim_panel)
         self._refresh_animation_ui()
@@ -579,6 +587,7 @@ class SpriteEditor:
                     style_name,
                     background=background,
                     foreground=foreground,
+                    anchor="center",
                     padding=(6, 2),
                 )
             except tk.TclError:
@@ -619,18 +628,31 @@ class SpriteEditor:
         except tk.TclError:
             return
         if button:
+            enabled_fg = foreground if foreground is not None else "#1f2937"
             map_options = {
                 "background": [
+                    ("disabled", BUTTON_DISABLED_BG),
                     ("active", background),
                     ("pressed", background),
                     ("!disabled", background),
                 ],
-                "bordercolor": [("!disabled", bordercolor)],
-                "lightcolor": [("!disabled", lightcolor)],
-                "darkcolor": [("!disabled", darkcolor)],
+                "foreground": [
+                    ("disabled", BUTTON_DISABLED_FG),
+                    ("!disabled", enabled_fg),
+                ],
+                "bordercolor": [
+                    ("disabled", BUTTON_DISABLED_BORDER),
+                    ("!disabled", bordercolor),
+                ],
+                "lightcolor": [
+                    ("disabled", BUTTON_DISABLED_BORDER),
+                    ("!disabled", lightcolor),
+                ],
+                "darkcolor": [
+                    ("disabled", BUTTON_DISABLED_BORDER),
+                    ("!disabled", darkcolor),
+                ],
             }
-            if foreground is not None:
-                map_options["foreground"] = [("!disabled", foreground)]
             style.map(style_name, **map_options)
 
     def _apply_app_theme(self, background):
@@ -690,7 +712,10 @@ class SpriteEditor:
             except tk.TclError:
                 pass
         self._configure_theme_style(
-            "TButton", self._default_button_bg, button=True
+            "TButton",
+            self._default_button_bg,
+            button=True,
+            foreground="#1f2937",
         )
 
         self.root.update_idletasks()
@@ -1167,6 +1192,16 @@ class SpriteEditor:
         logging.debug("preview start animation=%s frame=%s", self.current_animation, start_index)
         self._schedule_anim_preview_tick()
 
+    def _restore_after_preview(self):
+        return_to_edit = self._preview_return_to_frame_edit
+        self._preview_return_to_frame_edit = False
+        logging.debug("preview stop return_to_edit=%s", return_to_edit)
+        if return_to_edit:
+            self.select_anim_frame(self.current_anim_frame)
+        elif hasattr(self, "canvas"):
+            self.refresh_views()
+        self._update_preview_status()
+
     def stop_anim_preview(self):
         if not self.anim_preview_running and self._anim_preview_after_id is None:
             return
@@ -1175,13 +1210,7 @@ class SpriteEditor:
             self.root.after_cancel(self._anim_preview_after_id)
             self._anim_preview_after_id = None
         self._set_preview_ui_state(True)
-        return_to_edit = self._preview_return_to_frame_edit
-        self._preview_return_to_frame_edit = False
-        logging.debug("preview stop return_to_edit=%s", return_to_edit)
-        if return_to_edit:
-            self.select_anim_frame(self.current_anim_frame)
-        elif hasattr(self, "canvas"):
-            self.refresh_views()
+        self._restore_after_preview()
 
     def toggle_anim_preview(self):
         if self.anim_preview_running:
@@ -1223,9 +1252,7 @@ class SpriteEditor:
                     self.root.after_cancel(self._anim_preview_after_id)
                     self._anim_preview_after_id = None
                 self._set_preview_ui_state(True)
-                self._preview_return_to_frame_edit = False
-                if hasattr(self, "canvas"):
-                    self.refresh_views()
+                self._restore_after_preview()
                 logging.debug("preview finished (no loop)")
                 return False
 
@@ -1277,23 +1304,35 @@ class SpriteEditor:
             )
         self._update_edit_mode_indicator()
 
+    def _iter_ui_buttons(self, parent=None):
+        root = parent or getattr(self, "_main_frame", None) or self.root
+        for child in root.winfo_children():
+            if isinstance(child, (ttk.Button, tk.Button)):
+                yield child
+            yield from self._iter_ui_buttons(child)
+
     def _set_preview_ui_state(self, enabled: bool):
         state = tk.NORMAL if enabled else tk.DISABLED
-        for widget_name in (
-            "anim_play_btn",
-            "anim_combo",
-            "anim_frame_list",
-        ):
+        stop_btn = getattr(self, "anim_stop_btn", None)
+        for btn in self._iter_ui_buttons():
+            if btn is stop_btn:
+                continue
+            try:
+                btn.config(state=state)
+            except tk.TclError:
+                pass
+        for widget_name in ("anim_combo", "anim_frame_list"):
             if hasattr(self, widget_name):
                 try:
                     getattr(self, widget_name).config(state=state)
                 except tk.TclError:
                     pass
         self._set_sprite_slots_enabled(enabled)
-        if hasattr(self, "anim_stop_btn"):
-            self.anim_stop_btn.config(
-                state=tk.DISABLED if enabled else tk.NORMAL
-            )
+        if stop_btn is not None:
+            stop_btn.config(state=tk.DISABLED if enabled else tk.NORMAL)
+        if enabled:
+            self._update_frame_edit_controls()
+            self._update_sprite_order_buttons()
 
     def _on_window_close(self):
         self.stop_anim_preview()
@@ -1998,7 +2037,7 @@ class SpriteEditor:
             if self.current_animation is not None:
                 anim = self.animations[self.current_animation]
                 text += f" — animation '{anim['name']}' selected"
-            bg, fg = "#e5e7eb", "#1f2937"
+            bg, fg = STATIC_MODE_INDICATOR_BG, "#ffffff"
             canvas_title = (
                 "Drawing Canvas - Stacked View (LMB=draw on current, RMB=erase on current)"
             )
