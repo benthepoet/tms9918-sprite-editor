@@ -109,6 +109,46 @@ class FrameEditTests(unittest.TestCase):
         self.editor._on_duration_changed()
         self.assertEqual(self.editor._frame_edit_snapshot["duration"], 12)
 
+    def test_mode_indicator_shows_frame_edit_vs_static(self):
+        editor = SpriteEditor(self.root, create_ui=True)
+        editor.sprite_size_mode = 8
+        editor.init_sprites(1)
+        editor.stack_vars = [tk.BooleanVar(value=True)]
+        editor.animations = [
+            {"name": "walk", "loop": True, "frames": [make_frame(size=8)]}
+        ]
+        editor.current_animation = 0
+        editor.update_status()
+        self.assertIn("STATIC EDIT", editor.mode_indicator.cget("text"))
+
+        editor.select_anim_frame(0)
+        self.assertIn("FRAME EDIT", editor.mode_indicator.cget("text"))
+        self.assertIn("walk", editor.mode_indicator.cget("text"))
+        self.assertIn("Frame Sprites", editor.sprite_slots_label.cget("text"))
+
+        editor.exit_animation_mode()
+        self.root.update_idletasks()
+        self.assertIn("STATIC EDIT", editor.mode_indicator.cget("text"))
+        self.assertIn("Sprite Slots", editor.sprite_slots_label.cget("text"))
+
+    def test_exit_animation_mode_without_selecting_sprite(self):
+        editor = SpriteEditor(self.root, create_ui=True)
+        editor.sprite_size_mode = 8
+        editor.init_sprites(1)
+        editor.stack_vars = [tk.BooleanVar(value=True)]
+        editor.animations = [
+            {"name": "walk", "loop": True, "frames": [make_frame(size=8)]}
+        ]
+        editor.current_animation = 0
+        editor._refresh_animation_ui()
+        editor.select_anim_frame(0)
+        editor.sprite_list.selection_clear(0, tk.END)
+        editor.exit_animation_mode()
+        self.root.update_idletasks()
+        self.root.update()
+        self.assertFalse(editor.anim_edit_mode)
+        self.assertIsNone(editor._frame_edit_snapshot)
+
 
 if __name__ == "__main__":
     unittest.main()

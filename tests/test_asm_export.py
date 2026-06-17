@@ -42,6 +42,45 @@ class AsmExportTests(unittest.TestCase):
         self.assertEqual(asm.count("; TI-99 Sprite 00"), 2)
         self.assertNotIn("; TI-99 Sprite 01", asm)
 
+    def test_build_animation_asm_includes_all_stacked_sprites_per_frame(self):
+        frame = make_frame(slots=2, duration=4)
+        frame["stack_mask"] = [True, True]
+        frame["sprites"][1]["pattern"][1][1] = 1
+        self.editor.animations = [
+            {"name": "stacked", "loop": True, "frames": [frame]}
+        ]
+        asm = self.editor.build_animation_asm(0)
+        self.assertIn("; TI-99 Sprite 00", asm)
+        self.assertIn("; TI-99 Sprite 01", asm)
+
+    def test_panel_text_includes_all_stacked_sprites_in_frame_edit(self):
+        frame = make_frame(slots=2, duration=6)
+        frame["stack_mask"] = [True, True]
+        frame["sprites"][1]["pattern"][1][1] = 1
+        self.editor.animations = [
+            {"name": "walk", "loop": True, "frames": [frame]}
+        ]
+        self.editor.current_animation = 0
+        self.editor.select_anim_frame(0)
+        text = self.editor._build_asm_panel_text()
+        self.assertIn("; Animation 'walk' / Frame 0", text)
+        self.assertIn("; TI-99 Sprite 00", text)
+        self.assertIn("; TI-99 Sprite 01", text)
+
+    def test_panel_text_includes_all_stacked_sprites_in_preview(self):
+        frame = make_frame(slots=2, duration=4)
+        frame["stack_mask"] = [True, True]
+        self.editor.animations = [
+            {"name": "walk", "loop": True, "frames": [frame]}
+        ]
+        self.editor.current_animation = 0
+        self.editor.anim_preview_running = True
+        self.editor._anim_preview_index = 0
+        text = self.editor._build_asm_panel_text()
+        self.assertTrue(text.startswith("; Preview frame 1/1\n"))
+        self.assertIn("; TI-99 Sprite 00", text)
+        self.assertIn("; TI-99 Sprite 01", text)
+
     def test_panel_text_adds_animation_header_in_static_mode(self):
         self.editor.current_animation = 0
         self.editor.animations = [

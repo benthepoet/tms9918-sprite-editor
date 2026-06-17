@@ -159,17 +159,30 @@ class SpriteEditor:
             btn.grid(row=i//4, column=i%4, padx=3, pady=3)
         
         # Center: Drawing Canvas (now supports stacking)
-        canvas_frame = ttk.LabelFrame(main_frame, text="Drawing Canvas - Stacked View (LMB=draw on current, RMB=erase on current)")
-        canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
+        self.canvas_frame = ttk.LabelFrame(
+            main_frame,
+            text="Drawing Canvas - Stacked View (LMB=draw on current, RMB=erase on current)",
+        )
+        self.canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
+
+        self.mode_indicator = tk.Label(
+            self.canvas_frame,
+            text="",
+            font=("Arial", 11, "bold"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self.mode_indicator.pack(fill="x", padx=5, pady=(5, 0))
         
-        self.canvas = tk.Canvas(canvas_frame, bg="#777777")
+        self.canvas = tk.Canvas(self.canvas_frame, bg="#777777")
         self.canvas.pack(pady=10)
         self.canvas.bind("<Button-1>", self.draw_pixel)
         self.canvas.bind("<B1-Motion>", self.draw_pixel)
         self.canvas.bind("<Button-3>", self.erase_pixel)
         self.canvas.bind("<B3-Motion>", self.erase_pixel)
 
-        asm_frame = ttk.LabelFrame(canvas_frame, text="Assembly Export")
+        asm_frame = ttk.LabelFrame(self.canvas_frame, text="Assembly Export")
         asm_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
 
         self.asm_text = tk.Text(asm_frame, height=6, font=("Courier", 10), wrap=tk.NONE)
@@ -209,7 +222,10 @@ class SpriteEditor:
         self._right_scroll_canvas.bind("<Configure>", _resize_right_scroll_window)
         self._bind_right_panel_scroll(right_outer)
         
-        ttk.Label(right_frame, text="Sprite Slots (check to stack)").pack(anchor="w")
+        self.sprite_slots_label = ttk.Label(
+            right_frame, text="Sprite Slots (check to stack)"
+        )
+        self.sprite_slots_label.pack(anchor="w")
         
         list_frame = ttk.Frame(right_frame)
         list_frame.pack(pady=5, fill="x")
@@ -675,6 +691,7 @@ class SpriteEditor:
         self.status.config(text=txt)
         if hasattr(self, "anim_preview_status"):
             self.anim_preview_status.config(text=txt)
+        self._update_edit_mode_indicator()
 
     def _set_preview_ui_state(self, enabled: bool):
         state = tk.NORMAL if enabled else tk.DISABLED
@@ -966,7 +983,8 @@ class SpriteEditor:
         self.rebuild_sprite_list(source="static")
         self._static_stack_mask = None
         self._static_stack_enabled = None
-        self._refresh_animation_ui()
+        self._refresh_animation_ui(select_frame=False)
+        self._clear_anim_frame_list_selection()
         self.refresh_views()
 
     def exit_animation_mode(self, commit=True):
@@ -1011,6 +1029,15 @@ class SpriteEditor:
             self.anim_frame_list.selection_clear(0, tk.END)
             self.anim_frame_list.selection_set(index)
             self.anim_frame_list.activate(index)
+        finally:
+            self._suppress_anim_ui_events = False
+
+    def _clear_anim_frame_list_selection(self):
+        if not hasattr(self, "anim_frame_list"):
+            return
+        self._suppress_anim_ui_events = True
+        try:
+            self.anim_frame_list.selection_clear(0, tk.END)
         finally:
             self._suppress_anim_ui_events = False
 
@@ -1067,9 +1094,13 @@ class SpriteEditor:
             for index, frame in enumerate(self.animations[self.current_animation]["frames"]):
                 label = f"Frame {index} ({frame['duration']} sf)"
                 self.anim_frame_list.insert(tk.END, label)
-            if select_frame and self.animations[self.current_animation]["frames"]:
+            if (
+                select_frame
+                and self.anim_edit_mode
+                and self.animations[self.current_animation]["frames"]
+            ):
                 self._set_anim_frame_list_selection(self.current_anim_frame)
-                if self.anim_edit_mode and self._frame_edit_snapshot is not None:
+                if self._frame_edit_snapshot is not None:
                     self._set_anim_duration_var(self._frame_edit_snapshot["duration"])
 
     def _on_escape(self, event=None):
@@ -1225,6 +1256,51 @@ class SpriteEditor:
             self.current_color = self._active_sprites()[self.current_sprite]["color"]
             self.refresh_views()
     
+    def _update_edit_mode_indicator(self):
+        if not hasattr(self, "mode_indicator"):
+            return
+
+        if self.anim_preview_running and self.current_animation is not None:
+            anim = self.animations[self.current_animation]
+            frames = anim["frames"]
+            text = (
+                f"  PREVIEW — '{anim['name']}' "
+                f"frame {self._anim_preview_index + 1}/{len(frames)}"
+            )
+            bg, fg = "#1d4ed8", "#ffffff"
+            canvas_title = "Drawing Canvas — animation preview"
+            slots_label = "Frame Sprites (read-only during preview)"
+        elif self.anim_edit_mode:
+            anim_name = "?"
+            if self.current_animation is not None:
+                anim_name = self.animations[self.current_animation]["name"]
+            duration = 4
+            if self._frame_edit_snapshot is not None:
+                duration = self._frame_edit_snapshot.get("duration", 4)
+            text = (
+                f"  FRAME EDIT — '{anim_name}' frame {self.current_anim_frame} "
+                f"({duration} screen frames) — "
+                f"Escape: discard  |  Animation → Exit: commit"
+            )
+            bg, fg = "#b45309", "#ffffff"
+            canvas_title = "Drawing Canvas — editing animation frame"
+            slots_label = "Frame Sprites (layers in this frame, check to stack)"
+        else:
+            text = "  STATIC EDIT — editing project sprite slots"
+            if self.current_animation is not None:
+                anim = self.animations[self.current_animation]
+                text += f" — animation '{anim['name']}' selected"
+            bg, fg = "#e5e7eb", "#1f2937"
+            canvas_title = (
+                "Drawing Canvas - Stacked View (LMB=draw on current, RMB=erase on current)"
+            )
+            slots_label = "Sprite Slots (project sprites, check to stack)"
+
+        self.mode_indicator.config(text=text, bg=bg, fg=fg)
+        self.canvas_frame.config(text=canvas_title)
+        if hasattr(self, "sprite_slots_label"):
+            self.sprite_slots_label.config(text=slots_label)
+
     def update_status(self):
         sprites = self._active_sprites()
         sprite_data = sprites[self.current_sprite]
@@ -1244,6 +1320,7 @@ class SpriteEditor:
             anim = self.animations[self.current_animation]
             txt += f" | ANIM: {anim['name']} ({len(anim['frames'])} frames)"
         self.status.config(text=txt)
+        self._update_edit_mode_indicator()
     
     def update_preview(self):
         self.preview_canvas.delete("all")
@@ -1305,19 +1382,33 @@ class SpriteEditor:
             self._refresh_animation_ui()
             self.refresh_views()
 
+    def _flush_pending_edits_for_save(self):
+        if self.anim_preview_running:
+            self.stop_anim_preview()
+        if self.anim_edit_mode:
+            self.commit_anim_frame()
+        if self.current_animation is not None and hasattr(self, "anim_loop_var"):
+            self.animations[self.current_animation]["loop"] = self.anim_loop_var.get()
+
+    def _build_project_data(self) -> dict:
+        self._flush_pending_edits_for_save()
+        data = {
+            "version": 2,
+            "mode": self.sprite_size_mode,
+            "sprites": self.sprites,
+            "animations": self.animations,
+        }
+        if self.current_animation is not None:
+            data["current_animation"] = self.current_animation
+        return data
+
     def save_project(self):
         fn = filedialog.asksaveasfilename(
             defaultextension=".json", filetypes=[("JSON", "*.json")]
         )
         if fn:
-            data = {
-                "version": 2,
-                "mode": self.sprite_size_mode,
-                "sprites": self.sprites,
-                "animations": self.animations,
-            }
             with open(fn, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+                json.dump(self._build_project_data(), f, indent=2)
             messagebox.showinfo("Saved", "Project saved.")
 
     def load_project_data(self, data: dict) -> list[str]:
@@ -1334,6 +1425,13 @@ class SpriteEditor:
             target_slot_count=len(self.sprites),
         )
         self._reset_animation_state()
+        if self.animations:
+            saved_index = data.get("current_animation", 0)
+            if isinstance(saved_index, int) and 0 <= saved_index < len(self.animations):
+                self.current_animation = saved_index
+            else:
+                self.current_animation = 0
+            self.current_anim_frame = 0
         self.current_sprite = 0
         self.current_color = self.sprites[0]["color"]
         self.rebuild_sprite_list()
@@ -1395,6 +1493,17 @@ class SpriteEditor:
         sprites, _, _ = self._get_active_sprite_state()
         return self._build_asm_for_sprite_data(sprites[sprite_index], sprite_index)
 
+    def build_frame_asm(self, sprites, stack_enabled, stack_mask, header=""):
+        indices = self._resolve_stack_indices(
+            stack_mask, stack_enabled, self.current_sprite
+        )
+        parts = []
+        if header:
+            parts.append(header.rstrip("\n"))
+        for slot_idx in indices:
+            parts.append(self._build_asm_for_sprite_data(sprites[slot_idx], slot_idx))
+        return "\n".join(parts)
+
     def build_animation_asm(self, anim_index):
         anim = self.animations[anim_index]
         frames = anim.get("frames", [])
@@ -1403,13 +1512,11 @@ class SpriteEditor:
         for index, frame in enumerate(frames):
             durations.append(frame["duration"])
             lines.append(f"; Frame {index}: duration={frame['duration']} screen frames")
-            indices = self._resolve_stack_indices(
-                frame["stack_mask"], frame["stack_enabled"], self.current_sprite
+            frame_asm = self.build_frame_asm(
+                frame["sprites"], frame["stack_enabled"], frame["stack_mask"]
             )
-            for slot_idx in indices:
-                lines.append(
-                    self._build_asm_for_sprite_data(frame["sprites"][slot_idx], slot_idx)
-                )
+            if frame_asm:
+                lines.append(frame_asm)
             lines.append("")
         total_sf = sum(durations)
         lines.append(f"; Durations (screen frames): {', '.join(str(d) for d in durations)}")
@@ -1421,8 +1528,30 @@ class SpriteEditor:
     def _build_asm_panel_text(self):
         if self.anim_preview_running and self.current_animation is not None:
             frames = self.animations[self.current_animation]["frames"]
+            frame = frames[self._anim_preview_index]
             header = f"; Preview frame {self._anim_preview_index + 1}/{len(frames)}\n"
-            return header + self.build_asm_text()
+            return self.build_frame_asm(
+                frame["sprites"],
+                frame["stack_enabled"],
+                frame["stack_mask"],
+                header=header,
+            )
+
+        if self.anim_edit_mode and self._frame_edit_snapshot is not None:
+            snapshot = self._frame_edit_snapshot
+            anim_name = ""
+            if self.current_animation is not None:
+                anim_name = self.animations[self.current_animation]["name"]
+            header = (
+                f"; Animation '{anim_name}' / Frame {self.current_anim_frame} "
+                f"(duration={snapshot['duration']} sf)\n"
+            )
+            return self.build_frame_asm(
+                snapshot["sprites"],
+                snapshot["stack_enabled"],
+                snapshot["stack_mask"],
+                header=header,
+            )
 
         asm = self.build_asm_text()
         if (

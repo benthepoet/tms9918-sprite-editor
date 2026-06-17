@@ -133,21 +133,48 @@ class SpriteEditorAnimationTests(unittest.TestCase):
         self.editor.animations = [
             {"name": "blink", "loop": True, "frames": [make_frame()]}
         ]
-        payload = {
-            "version": 2,
-            "mode": self.editor.sprite_size_mode,
-            "sprites": self.editor.sprites,
-            "animations": json.loads(json.dumps(self.editor.animations)),
-        }
+        self.editor.current_animation = 0
+        payload = self.editor._build_project_data()
         other = SpriteEditor(tk.Tk(), create_ui=False)
         try:
             warnings = other.load_project_data(payload)
             self.assertEqual(len(other.animations), 1)
             self.assertEqual(other.animations[0]["name"], "blink")
             self.assertEqual(len(other.animations[0]["frames"]), 1)
+            self.assertEqual(other.current_animation, 0)
             self.assertEqual(warnings, [])
         finally:
             other.root.destroy()
+
+    def test_save_commits_uncommitted_frame_edits(self):
+        self.editor.sprite_size_mode = 8
+        self.editor.init_sprites(1)
+        self.editor.stack_vars = [tk.BooleanVar(value=True)]
+        frame = make_frame(size=8)
+        frame["sprites"][0]["pattern"][0][0] = 0
+        self.editor.animations = [
+            {"name": "walk", "loop": True, "frames": [frame]}
+        ]
+        self.editor.current_animation = 0
+        self.editor.select_anim_frame(0)
+        self.editor._frame_edit_snapshot["sprites"][0]["pattern"][0][0] = 1
+        payload = self.editor._build_project_data()
+        self.assertEqual(
+            payload["animations"][0]["frames"][0]["sprites"][0]["pattern"][0][0], 1
+        )
+
+    def test_load_restores_animation_selection_in_ui(self):
+        editor = SpriteEditor(self.root, create_ui=True)
+        editor.sprite_size_mode = 8
+        editor.sprites = [{"pattern": [[0] * 8 for _ in range(8)], "color": 2}]
+        editor.animations = [
+            {"name": "walk", "loop": True, "frames": [make_frame(size=8)]}
+        ]
+        editor.current_animation = 0
+        payload = editor._build_project_data()
+        editor.load_project_data(payload)
+        self.assertEqual(editor.current_animation, 0)
+        self.assertEqual(editor.anim_combo.get(), "walk")
 
 
 if __name__ == "__main__":
