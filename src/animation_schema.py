@@ -32,6 +32,21 @@ def ensure_sprite_names(sprites: list) -> None:
             sprite["name"] = default_sprite_name(index)
 
 
+def sprite_names_in_use(sprites: list) -> set[str]:
+    return {
+        sprite_display_name(sprite, index).lower()
+        for index, sprite in enumerate(sprites)
+    }
+
+
+def next_unique_sprite_name(sprites: list) -> str:
+    existing = sprite_names_in_use(sprites)
+    index = len(sprites)
+    while default_sprite_name(index).lower() in existing:
+        index += 1
+    return default_sprite_name(index)
+
+
 def deep_copy_sprite(sprite: dict) -> dict:
     copied = {
         "pattern": [row[:] for row in sprite["pattern"]],
@@ -114,16 +129,27 @@ def compact_frame_slots(
 
 
 def normalize_frame_slots(
-    frame: dict, target_count: int, size: int, default_color: int = 2
+    frame: dict,
+    target_count: int,
+    size: int,
+    default_color: int = 2,
+    *,
+    stack_padded: bool = False,
 ) -> dict:
     """Pad or trim sprites and stack_mask to match target slot count."""
     sprites = [deep_copy_sprite(sprite) for sprite in frame.get("sprites", [])]
     mask = list(frame.get("stack_mask", []))
 
     if len(sprites) < target_count:
-        for _ in range(target_count - len(sprites)):
-            sprites.append(create_empty_sprite_dict(size, default_color))
-        mask.extend([False] * (target_count - len(mask)))
+        while len(sprites) < target_count:
+            sprites.append(
+                create_empty_sprite_dict(
+                    size,
+                    default_color,
+                    next_unique_sprite_name(sprites),
+                )
+            )
+        mask.extend([stack_padded] * (target_count - len(mask)))
     elif len(sprites) > target_count:
         sprites = sprites[:target_count]
         mask = mask[:target_count]
@@ -131,6 +157,53 @@ def normalize_frame_slots(
     frame["sprites"] = sprites
     frame["stack_mask"] = mask
     return frame
+
+
+def animation_frame_slot_count(anim: dict) -> int:
+    return max(
+        (len(frame.get("sprites", [])) for frame in anim.get("frames", [])),
+        default=0,
+    )
+
+
+def sync_animation_frame_slot_counts(
+    anim: dict,
+    size: int,
+    default_color: int = 2,
+    target_count: int | None = None,
+) -> int:
+    """Pad every frame in an animation to the same sprite slot count."""
+    frames = anim.get("frames", [])
+    if not frames:
+        return 0
+    if target_count is None:
+        target_count = animation_frame_slot_count(anim)
+    if target_count < 1:
+        target_count = 1
+    for frame in frames:
+        normalize_frame_slots(
+            frame, target_count, size, default_color, stack_padded=True
+        )
+    return target_count
+
+
+def is_empty_sprite(sprite: dict) -> bool:
+    pattern = sprite.get("pattern", [])
+    return all(cell == 0 for row in pattern for cell in row)
+
+
+def trim_autopadded_slots(anim: dict, target_count: int) -> None:
+    """Remove trailing empty slots above target_count from every frame."""
+    for frame in anim.get("frames", []):
+        sprites = frame.get("sprites", [])
+        mask = frame.get("stack_mask", [])
+        while len(sprites) > target_count:
+            index = len(sprites) - 1
+            if not is_empty_sprite(sprites[index]):
+                break
+            del sprites[index]
+            if index < len(mask):
+                del mask[index]
 
 
 def validate_frame(frame: dict, size: int) -> bool:
@@ -178,7 +251,11 @@ def validate_and_sanitize_animations(
                 "stack_mask": list(raw_frame.get("stack_mask", [])),
                 "sprites": deep_copy_sprites(raw_frame.get("sprites", [])),
             }
-            compact_frame_slots(frame, size, default_color)
+            if not frame.get("sprites"):
+                frame["sprites"] = [
+                    create_empty_sprite_dict(size, default_color, default_sprite_name(0))
+                ]
+                frame["stack_mask"] = [True]
             if validate_frame(frame, size):
                 valid_frames.append(frame)
             else:
@@ -186,5 +263,7 @@ def validate_and_sanitize_animations(
                     f"Invalid frame {index} in '{anim.get('name')}'; dropped."
                 )
         anim["frames"] = valid_frames
+        if valid_frames:
+            sync_animation_frame_slot_counts(anim, size, default_color)
 
     return anims, warnings

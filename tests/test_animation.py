@@ -8,16 +8,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import tkinter as tk
 
 from animation_schema import (
+    animation_frame_slot_count,
     compact_frame_slots,
     deep_copy_frame,
     deep_copy_sprite,
     default_animation_name,
     default_sprite_name,
     next_default_animation_name,
+    next_unique_sprite_name,
     ensure_sprite_names,
     frames_equal,
     normalize_frame_slots,
     sprite_display_name,
+    sync_animation_frame_slot_counts,
+    trim_autopadded_slots,
     validate_and_sanitize_animations,
     validate_frame,
 )
@@ -91,6 +95,10 @@ class AnimationSchemaTests(unittest.TestCase):
         sprite = {"pattern": [[0]], "color": 2, "name": "  "}
         self.assertEqual(sprite_display_name(sprite, 3), default_sprite_name(3))
 
+    def test_next_unique_sprite_name_avoids_existing_names(self):
+        sprites = [{"pattern": [[0]], "color": 2, "name": "SPR1"}]
+        self.assertEqual(next_unique_sprite_name(sprites), default_sprite_name(2))
+
     def test_compact_frame_slots_keeps_only_stacked_sprites(self):
         frame = make_frame(slots=3)
         frame["stack_mask"] = [True, True, False]
@@ -109,6 +117,36 @@ class AnimationSchemaTests(unittest.TestCase):
         result, warnings = validate_and_sanitize_animations(anims, 8, max_animations=32)
         self.assertEqual(len(result), 32)
         self.assertTrue(any("truncating" in warning for warning in warnings))
+
+    def test_sync_animation_frame_slot_counts_aligns_frames(self):
+        anim = {
+            "name": "walk",
+            "loop": True,
+            "frames": [make_frame(slots=1), make_frame(slots=3)],
+        }
+        sync_animation_frame_slot_counts(anim, 8)
+        self.assertEqual(animation_frame_slot_count(anim), 3)
+        for frame in anim["frames"]:
+            self.assertEqual(len(frame["sprites"]), 3)
+
+    def test_trim_autopadded_slots_removes_trailing_empty_slots(self):
+        padded = make_frame(slots=1)
+        padded["sprites"].append(
+            {
+                "pattern": [[0] * 8 for _ in range(8)],
+                "color": 2,
+                "name": default_sprite_name(1),
+            }
+        )
+        padded["stack_mask"].append(False)
+        anim = {
+            "name": "walk",
+            "loop": True,
+            "frames": [make_frame(slots=1), padded],
+        }
+        trim_autopadded_slots(anim, 1)
+        self.assertEqual(len(anim["frames"][0]["sprites"]), 1)
+        self.assertEqual(len(anim["frames"][1]["sprites"]), 1)
 
 
 class SpriteEditorAnimationTests(unittest.TestCase):
@@ -182,6 +220,57 @@ class SpriteEditorAnimationTests(unittest.TestCase):
         self.editor.add_sprite()
         self.assertEqual(len(self.editor.sprites), 1)
         self.assertEqual(len(self.editor._frame_edit_snapshot["sprites"]), 2)
+
+    def test_add_sprite_in_frame_edit_assigns_unique_names(self):
+        self.editor.init_sprites(2)
+        self.editor.current_sprite = 1
+        self.editor.animations = [
+            {"name": "walk", "loop": True, "frames": []},
+        ]
+        self.editor.current_animation = 0
+        self.editor.add_anim_frame()
+        self.editor.add_sprite()
+        names = [
+            sprite_display_name(sprite, index)
+            for index, sprite in enumerate(
+                self.editor._frame_edit_snapshot["sprites"]
+            )
+        ]
+        self.assertEqual(names, [default_sprite_name(0), default_sprite_name(1)])
+
+    def test_add_sprite_in_frame_edit_pads_other_frames(self):
+        self.editor.init_sprites(1)
+        self.editor.animations = [
+            {
+                "name": "walk",
+                "loop": True,
+                "frames": [make_frame(slots=1), make_frame(slots=1)],
+            }
+        ]
+        self.editor.current_animation = 0
+        self.editor.select_anim_frame(0)
+        self.editor.add_sprite()
+        self.assertEqual(len(self.editor._frame_edit_snapshot["sprites"]), 2)
+        self.assertEqual(len(self.editor.animations[0]["frames"][1]["sprites"]), 2)
+        self.assertTrue(self.editor.animations[0]["frames"][1]["stack_mask"][1])
+
+    def test_discard_frame_edit_trims_autopadded_slots(self):
+        self.editor.init_sprites(1)
+        self.editor.animations = [
+            {
+                "name": "walk",
+                "loop": True,
+                "frames": [make_frame(slots=1), make_frame(slots=1)],
+            }
+        ]
+        self.editor.current_animation = 0
+        self.editor.select_anim_frame(0)
+        self.editor.add_sprite()
+        self.editor.discard_anim_frame_edits()
+        for frame in self.editor.animations[0]["frames"]:
+            self.assertEqual(len(frame["sprites"]), 1)
+        self.assertEqual(len(self.editor._frame_edit_snapshot["sprites"]), 1)
+        self.assertFalse(self.editor._frame_edit_is_dirty())
 
     def test_reset_animation_state_clears_edit_flags(self):
         self.editor.anim_edit_mode = True

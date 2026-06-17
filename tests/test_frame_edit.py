@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -84,7 +85,7 @@ class FrameEditTests(unittest.TestCase):
         self.assertEqual(len(self.editor.animations[0]["frames"]), 3)
         self.assertTrue(self.editor.anim_edit_mode)
 
-    def test_capture_frame_only_copies_stacked_sprite_data(self):
+    def test_capture_frame_only_copies_current_sprite(self):
         self.editor.init_sprites(3)
         self.editor.stack_vars = [
             tk.BooleanVar(value=True),
@@ -94,12 +95,32 @@ class FrameEditTests(unittest.TestCase):
         self.editor.sprites[0]["pattern"][0][0] = 1
         self.editor.sprites[1]["pattern"][1][1] = 1
         self.editor.sprites[2]["pattern"][2][2] = 1
+        self.editor.current_sprite = 1
         self.editor.add_anim_frame()
         frame = self.editor.animations[0]["frames"][-1]
-        self.assertEqual(len(frame["sprites"]), 2)
-        self.assertEqual(frame["sprites"][0]["pattern"][0][0], 1)
-        self.assertEqual(frame["sprites"][1]["pattern"][1][1], 1)
-        self.assertEqual(frame["stack_mask"], [True, True])
+        self.assertEqual(len(frame["sprites"]), 1)
+        self.assertEqual(frame["sprites"][0]["pattern"][1][1], 1)
+        self.assertEqual(frame["stack_mask"], [True])
+
+    @patch("sprite.messagebox.askyesno", return_value=True)
+    def test_delete_anim_frame_updates_frame_list(self, _askyesno):
+        editor = SpriteEditor(self.root, create_ui=True)
+        editor.sprite_size_mode = 8
+        editor.init_sprites(1)
+        editor.stack_vars = [tk.BooleanVar(value=True)]
+        editor.animations = [
+            {
+                "name": "walk",
+                "loop": True,
+                "frames": [make_frame(size=8), make_frame(size=8, duration=8)],
+            }
+        ]
+        editor.current_animation = 0
+        editor.select_anim_frame(0)
+        editor.delete_anim_frame()
+        self.assertEqual(len(editor.animations[0]["frames"]), 1)
+        self.assertEqual(editor.anim_frame_list.size(), 1)
+        self.assertIn("(8 sf)", editor.anim_frame_list.get(0))
 
     def test_capture_frame_does_not_recurse_with_ui(self):
         editor = SpriteEditor(self.root, create_ui=True)
