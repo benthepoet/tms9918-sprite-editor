@@ -57,6 +57,12 @@ CANVAS_OFF_PIXEL = "#555555"
 ANIM_EDIT_APP_BG = "#fff7ed"
 ANIM_PREVIEW_APP_BG = "#eef4ff"
 PANEL_TEXT_BG = "#ffffff"
+PANEL_TITLE_FG = "#111827"
+PANEL_TITLE_FONT = ("Arial", 11, "bold")
+DIRTY_LABEL_BG = "#fef08a"
+DIRTY_LABEL_FG = "#713f12"
+SAVED_LABEL_BG = "#bbf7d0"
+SAVED_LABEL_FG = "#14532d"
 
 if os.environ.get("SPRITE_EDITOR_DEBUG"):
     logging.basicConfig(level=logging.DEBUG)
@@ -436,17 +442,25 @@ class SpriteEditor:
 
         frame_btn_row = ttk.Frame(anim_panel)
         frame_btn_row.pack(fill="x", padx=5, pady=5)
+        frame_order_controls = ttk.Frame(frame_btn_row)
+        frame_order_controls.pack(side=tk.RIGHT)
+        ttk.Button(
+            frame_order_controls,
+            text="↑",
+            width=2,
+            command=lambda: self.move_anim_frame(-1),
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            frame_order_controls,
+            text="↓",
+            width=2,
+            command=lambda: self.move_anim_frame(1),
+        ).pack(side=tk.LEFT, padx=(2, 0))
         ttk.Button(frame_btn_row, text="+ Frame", command=self.add_anim_frame).pack(
             side=tk.LEFT, expand=True, fill="x", padx=(0, 2)
         )
         ttk.Button(frame_btn_row, text="− Frame", command=self.delete_anim_frame).pack(
-            side=tk.LEFT, expand=True, fill="x", padx=2
-        )
-        ttk.Button(frame_btn_row, text="↑", width=3, command=lambda: self.move_anim_frame(-1)).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(frame_btn_row, text="↓", width=3, command=lambda: self.move_anim_frame(1)).pack(
-            side=tk.LEFT, padx=(2, 0)
+            side=tk.LEFT, expand=True, fill="x", padx=(2, 4)
         )
 
         frame_edit_row = ttk.Frame(anim_panel)
@@ -506,11 +520,27 @@ class SpriteEditor:
         self.status = ttk.Label(self.root, text="", relief=tk.SUNKEN, anchor=tk.W)
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
 
+        self._configure_frame_status_label_styles()
         self._restore_static_theme()
         
         self.update_canvas()
         self.update_status()
         self.update_asm_export()
+
+    def _configure_frame_status_label_styles(self):
+        for style_name, background, foreground in (
+            ("Dirty.TLabel", DIRTY_LABEL_BG, DIRTY_LABEL_FG),
+            ("Saved.TLabel", SAVED_LABEL_BG, SAVED_LABEL_FG),
+        ):
+            try:
+                self._ui_style.configure(
+                    style_name,
+                    background=background,
+                    foreground=foreground,
+                    padding=(6, 2),
+                )
+            except tk.TclError:
+                pass
 
     def _button_border_colors(self, background):
         if background == ANIM_EDIT_APP_BG:
@@ -524,12 +554,14 @@ class SpriteEditor:
         )
 
     def _configure_theme_style(
-        self, style_name, background, *, button=False, foreground=None
+        self, style_name, background, *, button=False, foreground=None, font=None
     ):
         style = self._ui_style
         options = {"background": background}
         if foreground is not None:
             options["foreground"] = foreground
+        if font is not None:
+            options["font"] = font
         bordercolor = lightcolor = darkcolor = None
         if button:
             bordercolor, lightcolor, darkcolor = self._button_border_colors(background)
@@ -567,8 +599,14 @@ class SpriteEditor:
         text_fg = "#1f2937"
         for name in ("TFrame", "TLabelframe"):
             self._configure_theme_style(name, background)
-        for name in ("TLabel", "TLabelframe.Label", "TCheckbutton"):
+        for name in ("TLabel", "TCheckbutton"):
             self._configure_theme_style(name, background, foreground=text_fg)
+        self._configure_theme_style(
+            "TLabelframe.Label",
+            background,
+            foreground=PANEL_TITLE_FG,
+            font=PANEL_TITLE_FONT,
+        )
         for name in ("TSpinbox", "TCombobox"):
             self._configure_theme_style(name, background, foreground=text_fg)
             try:
@@ -589,11 +627,17 @@ class SpriteEditor:
         style = self._ui_style
         style.configure("TFrame", background=self._static_app_bg)
         style.configure("TLabelframe", background=self._static_app_bg)
-        for widget_style in ("TLabel", "TLabelframe.Label", "TCheckbutton"):
+        for widget_style in ("TLabel", "TCheckbutton"):
             try:
                 style.configure(widget_style, background=self._default_label_bg)
             except tk.TclError:
                 pass
+        self._configure_theme_style(
+            "TLabelframe.Label",
+            self._static_app_bg,
+            foreground=PANEL_TITLE_FG,
+            font=PANEL_TITLE_FONT,
+        )
         for widget_style in ("TSpinbox", "TCombobox"):
             try:
                 style.configure(
@@ -1482,11 +1526,15 @@ class SpriteEditor:
         self.anim_commit_btn.config(state=state)
         self.anim_discard_btn.config(state=state)
         if not in_edit:
-            self.anim_frame_dirty_label.config(text="")
+            self.anim_frame_dirty_label.config(text="", style="TLabel")
         elif dirty:
-            self.anim_frame_dirty_label.config(text="Unsaved changes")
+            self.anim_frame_dirty_label.config(
+                text="Unsaved changes", style="Dirty.TLabel"
+            )
         else:
-            self.anim_frame_dirty_label.config(text="All changes saved")
+            self.anim_frame_dirty_label.config(
+                text="All changes saved", style="Saved.TLabel"
+            )
 
     def select_anim_frame(self, index):
         if self.anim_preview_running:
