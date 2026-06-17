@@ -51,6 +51,9 @@ COLOR_NAMES = [
 ]
 
 VDP_FRAME_SEC = 1.0 / 59.94
+CANVAS_BG = "#777777"
+CANVAS_GRID_OUTLINE = "#555555"
+CANVAS_OFF_PIXEL = "#555555"
 
 if os.environ.get("SPRITE_EDITOR_DEBUG"):
     logging.basicConfig(level=logging.DEBUG)
@@ -227,8 +230,21 @@ class SpriteEditor:
             btn.bind("<Button-1>", lambda e, c=i: self.set_color(c))
             btn.grid(row=i // 4, column=i % 4, padx=2, pady=2, sticky="nsew")
 
-        sprites_panel = ttk.LabelFrame(left_outer, text="Sprites")
-        sprites_panel.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        color_indicator_row = ttk.Frame(palette_frame)
+        color_indicator_row.grid(row=4, column=0, columnspan=4, sticky="ew", padx=5, pady=(4, 5))
+        self._current_color_label = ttk.Label(color_indicator_row, text="", anchor="w")
+        self._current_color_label.pack(side=tk.LEFT, fill="x", expand=True)
+        self._current_color_swatch = tk.Canvas(
+            color_indicator_row,
+            width=40,
+            height=26,
+            highlightthickness=2,
+            highlightbackground="#333333",
+        )
+        self._current_color_swatch.pack(side=tk.RIGHT)
+
+        self.sprites_panel = ttk.LabelFrame(left_outer, text="Project Sprites")
+        self.sprites_panel.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
         
         # Center: Drawing Canvas (now supports stacking)
         self.canvas_frame = ttk.LabelFrame(
@@ -267,13 +283,23 @@ class SpriteEditor:
 
         right_frame = ttk.Frame(right_outer)
         right_frame.pack(fill=tk.BOTH, expand=True)
-        list_frame = ttk.Frame(sprites_panel)
+        list_frame = ttk.Frame(self.sprites_panel)
         list_frame.pack(pady=5, fill="x", padx=5)
 
         header_row = ttk.Frame(list_frame)
         header_row.pack(fill="x")
-        ttk.Label(header_row, text="Sprite").pack(side=tk.LEFT, fill="x", expand=True)
         ttk.Label(header_row, text="Stack").pack(side=tk.RIGHT)
+        order_controls = ttk.Frame(header_row)
+        order_controls.pack(side=tk.RIGHT, padx=(0, 6))
+        self._sprite_move_up_btn = ttk.Button(
+            order_controls, text="↑", width=2, command=lambda: self.move_sprite(-1)
+        )
+        self._sprite_move_up_btn.pack(side=tk.LEFT)
+        self._sprite_move_down_btn = ttk.Button(
+            order_controls, text="↓", width=2, command=lambda: self.move_sprite(1)
+        )
+        self._sprite_move_down_btn.pack(side=tk.LEFT, padx=(2, 0))
+        ttk.Label(header_row, text="Sprite").pack(side=tk.LEFT, fill="x", expand=True)
 
         slots_scroll_frame = ttk.Frame(list_frame)
         slots_scroll_frame.pack(fill="x", pady=(2, 0))
@@ -309,7 +335,7 @@ class SpriteEditor:
         self.stack_vars = []
         self.rebuild_sprite_list()
 
-        sprite_btn_frame = ttk.Frame(sprites_panel)
+        sprite_btn_frame = ttk.Frame(self.sprites_panel)
         sprite_btn_frame.pack(fill="x", pady=5, padx=5)
         ttk.Button(sprite_btn_frame, text="Add", command=self.add_sprite).pack(
             side=tk.LEFT, expand=True, fill="x", padx=(0, 3)
@@ -317,29 +343,30 @@ class SpriteEditor:
         ttk.Button(sprite_btn_frame, text="Remove", command=self.remove_sprite).pack(
             side=tk.LEFT, expand=True, fill="x", padx=(3, 0)
         )
+
         ttk.Button(
-            sprites_panel, text="Rename", command=self.rename_sprite_dialog
+            self.sprites_panel, text="Rename", command=self.rename_sprite_dialog
         ).pack(pady=(0, 5), fill="x", padx=5)
 
         self.stack_enabled_checkbox = ttk.Checkbutton(
-            sprites_panel,
+            self.sprites_panel,
             text="Enable Stacking",
             variable=self.stack_enabled,
             command=self._on_stack_enabled_changed_static,
         )
         self.stack_enabled_checkbox.pack(anchor="w", padx=5, pady=(0, 5))
 
-        ttk.Button(sprites_panel, text="Clear Sprite", command=self.clear_current).pack(
+        ttk.Button(self.sprites_panel, text="Clear Sprite", command=self.clear_current).pack(
             pady=2, fill="x", padx=5
         )
-        ttk.Button(sprites_panel, text="Fill Sprite", command=self.fill_sprite).pack(
+        ttk.Button(self.sprites_panel, text="Fill Sprite", command=self.fill_sprite).pack(
             pady=2, fill="x", padx=5
         )
-        ttk.Button(sprites_panel, text="Duplicate Sprite", command=self.copy_to_next).pack(
-            pady=2, fill="x", padx=5
-        )
+        ttk.Button(
+            self.sprites_panel, text="Duplicate Sprite", command=self.copy_to_next
+        ).pack(pady=2, fill="x", padx=5)
 
-        self._bind_sprite_slots_scroll(left_outer, sprites_panel, list_frame)
+        self._bind_sprite_slots_scroll(left_outer, self.sprites_panel, list_frame)
 
         anim_panel = ttk.LabelFrame(right_frame, text="Animations")
         anim_panel.pack(fill="x")
@@ -423,6 +450,7 @@ class SpriteEditor:
             command=self._on_duration_changed,
         )
         self.anim_duration_spin.pack(side=tk.LEFT, padx=5)
+        self.anim_duration_var.trace_add("write", self._on_duration_var_changed)
 
         self.anim_loop_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
@@ -619,7 +647,34 @@ class SpriteEditor:
 
     def rgb_to_hex(self, rgb):
         return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
-    
+
+    def _color_display_hex(self, color_index):
+        if color_index == 0:
+            return "#aaaaaa"
+        return self.rgb_to_hex(TI_COLORS[color_index])
+
+    def _draw_color_swatch(self, canvas, color_index):
+        canvas.delete("all")
+        hex_color = self._color_display_hex(color_index)
+        canvas.configure(bg=hex_color)
+        if color_index == 0:
+            width = canvas.winfo_width() or int(canvas["width"])
+            height = canvas.winfo_height() or int(canvas["height"])
+            canvas.create_text(
+                width / 2,
+                height / 2,
+                text="T",
+                fill="black",
+                font=("Arial", 9, "bold"),
+            )
+
+    def _update_color_indicator(self):
+        if not hasattr(self, "_current_color_swatch"):
+            return
+        color = self.current_color
+        self._draw_color_swatch(self._current_color_swatch, color)
+        self._current_color_label.config(text=f"{color} — {COLOR_NAMES[color]}")
+
     def set_color(self, color):
         if self.anim_preview_running:
             return
@@ -728,6 +783,23 @@ class SpriteEditor:
         self.root.after_idle(self._update_sprite_slots_scroll_region)
         if slot_count:
             self._highlight_sprite_slot(self.current_sprite)
+        self._update_sprite_order_buttons()
+
+    def _update_sprite_order_buttons(self):
+        if not hasattr(self, "_sprite_move_up_btn"):
+            return
+        if self.anim_preview_running:
+            state = tk.DISABLED
+            self._sprite_move_up_btn.config(state=state)
+            self._sprite_move_down_btn.config(state=state)
+            return
+        count = self._active_sprite_count()
+        self._sprite_move_up_btn.config(
+            state=tk.NORMAL if self.current_sprite > 0 else tk.DISABLED
+        )
+        self._sprite_move_down_btn.config(
+            state=tk.NORMAL if count > 0 and self.current_sprite < count - 1 else tk.DISABLED
+        )
 
     def _sprite_list_source(self):
         if self.anim_edit_mode and self._frame_edit_snapshot is not None:
@@ -805,6 +877,39 @@ class SpriteEditor:
         if self.current_sprite >= len(self.sprites):
             self.current_sprite = max(0, len(self.sprites) - 1)
 
+    def _swap_sprite_slot_pair(self, sprites, mask, first, second):
+        sprites[first], sprites[second] = sprites[second], sprites[first]
+        if mask is not None:
+            mask[first], mask[second] = mask[second], mask[first]
+
+    def move_sprite(self, direction: int):
+        if self.anim_preview_running:
+            return
+        index = self.current_sprite
+        new_index = index + direction
+        if new_index < 0 or new_index >= self._active_sprite_count():
+            return
+        if self.anim_edit_mode and self._frame_edit_snapshot is not None:
+            snapshot = self._frame_edit_snapshot
+            self._swap_sprite_slot_pair(
+                snapshot["sprites"], snapshot["stack_mask"], index, new_index
+            )
+            self.current_sprite = new_index
+            self.rebuild_sprite_list(
+                source="frame", mask=snapshot["stack_mask"]
+            )
+        else:
+            self._swap_sprite_slot_pair(self.sprites, None, index, new_index)
+            if index < len(self.stack_vars) and new_index < len(self.stack_vars):
+                first_checked = self.stack_vars[index].get()
+                second_checked = self.stack_vars[new_index].get()
+                self.stack_vars[index].set(second_checked)
+                self.stack_vars[new_index].set(first_checked)
+            self.current_sprite = new_index
+            source, mask = self._sprite_list_source()
+            self.rebuild_sprite_list(source=source, mask=mask)
+        self.refresh_views()
+
     def _current_animation_has_frames(self):
         anim = self._current_animation()
         return anim is not None and bool(anim.get("frames"))
@@ -816,7 +921,7 @@ class SpriteEditor:
             size = self.sprite_size_mode
             ps = self.zoom
             self.canvas.delete("all")
-            self.canvas.config(width=size * ps + 4, height=size * ps + 4)
+            self.canvas.config(width=size * ps, height=size * ps)
             self._render_composite(
                 self.canvas,
                 frame["sprites"],
@@ -826,7 +931,7 @@ class SpriteEditor:
                 pixel_size=ps,
                 draw_off_pixels=False,
                 transparent_color="#aaaaaa",
-                outline="#666666",
+                outline=CANVAS_GRID_OUTLINE,
             )
         self.update_asm_export()
 
@@ -1412,9 +1517,15 @@ class SpriteEditor:
         finally:
             self._suppress_anim_ui_events = False
 
-    def _on_duration_changed(self):
+    def _on_duration_var_changed(self, *_args):
         if self._suppress_anim_ui_events:
             return
+        self._apply_duration_from_spinbox()
+
+    def _on_duration_changed(self):
+        self._apply_duration_from_spinbox()
+
+    def _apply_duration_from_spinbox(self):
         if not self.anim_edit_mode or self._frame_edit_snapshot is None:
             return
         try:
@@ -1424,6 +1535,8 @@ class SpriteEditor:
         if 1 <= duration <= 255:
             self._frame_edit_snapshot["duration"] = duration
             self._refresh_animation_ui(select_frame=False)
+            self._update_frame_edit_controls()
+            self._update_edit_mode_indicator()
 
     def _on_loop_changed(self):
         if self.current_animation is None:
@@ -1453,16 +1566,20 @@ class SpriteEditor:
 
         self.anim_frame_list.delete(0, tk.END)
         if self.current_animation is not None:
-            for index, frame in enumerate(self.animations[self.current_animation]["frames"]):
-                label = f"Frame {index} ({frame['duration']} sf)"
+            anim = self.animations[self.current_animation]
+            for index, frame in enumerate(anim["frames"]):
+                duration = frame["duration"]
+                if (
+                    self.anim_edit_mode
+                    and self._frame_edit_snapshot is not None
+                    and index == self.current_anim_frame
+                ):
+                    duration = self._frame_edit_snapshot.get("duration", duration)
+                label = f"Frame {index} ({duration} sf)"
                 self.anim_frame_list.insert(tk.END, label)
-            if (
-                select_frame
-                and self.anim_edit_mode
-                and self.animations[self.current_animation]["frames"]
-            ):
+            if self.anim_edit_mode and anim["frames"]:
                 self._set_anim_frame_list_selection(self.current_anim_frame)
-                if self._frame_edit_snapshot is not None:
+                if select_frame and self._frame_edit_snapshot is not None:
                     self._set_anim_duration_var(self._frame_edit_snapshot["duration"])
 
     def _on_escape(self, event=None):
@@ -1487,7 +1604,7 @@ class SpriteEditor:
     def _resolve_stack_indices(self, stack_mask, stack_enabled, current_sprite):
         if not stack_enabled:
             return [current_sprite]
-        return sorted(i for i, enabled in enumerate(stack_mask) if enabled)
+        return [i for i, enabled in enumerate(stack_mask) if enabled]
 
     def _get_active_sprite_state(self):
         if self.anim_preview_running and self.current_animation is not None:
@@ -1503,6 +1620,19 @@ class SpriteEditor:
             mask[self.current_sprite] = True
         return self.sprites, self.stack_enabled.get(), mask
 
+    def _draw_sprite_grid(self, target_canvas, size, pixel_size, fill, outline):
+        for y in range(size):
+            for x in range(size):
+                px, py = x * pixel_size, y * pixel_size
+                target_canvas.create_rectangle(
+                    px,
+                    py,
+                    px + pixel_size,
+                    py + pixel_size,
+                    fill=fill,
+                    outline=outline,
+                )
+
     def _render_composite(
         self,
         target_canvas,
@@ -1514,13 +1644,16 @@ class SpriteEditor:
         pixel_size=None,
         draw_off_pixels=False,
         transparent_color="#000000",
-        outline="#666666",
+        outline=CANVAS_GRID_OUTLINE,
+        grid_empty_fill=CANVAS_BG,
     ):
         size = self.sprite_size_mode
         ps = pixel_size or (160 // size)
         indices = self._resolve_stack_indices(
             stack_mask, stack_enabled, current_sprite
         )
+
+        self._draw_sprite_grid(target_canvas, size, ps, grid_empty_fill, outline)
 
         if not stack_enabled:
             sprite_data = sprites[current_sprite]
@@ -1534,12 +1667,13 @@ class SpriteEditor:
             for y in range(size):
                 for x in range(size):
                     is_on = pattern[y][x] == 1
-                    if is_on or draw_off_pixels:
-                        fill = fg_hex if is_on else "#555555"
-                        px, py = x * ps, y * ps
-                        target_canvas.create_rectangle(
-                            px, py, px + ps, py + ps, fill=fill, outline=outline
-                        )
+                    if not is_on and not draw_off_pixels:
+                        continue
+                    fill = fg_hex if is_on else CANVAS_OFF_PIXEL
+                    px, py = x * ps, y * ps
+                    target_canvas.create_rectangle(
+                        px, py, px + ps, py + ps, fill=fill, outline=outline
+                    )
             return
 
         for idx in indices:
@@ -1563,7 +1697,7 @@ class SpriteEditor:
         self.canvas.delete("all")
         size = self.sprite_size_mode
         pixel_size = self.zoom
-        self.canvas.config(width=size * pixel_size + 4, height=size * pixel_size + 4)
+        self.canvas.config(width=size * pixel_size, height=size * pixel_size)
         sprites, stack_enabled, stack_mask = self._get_active_sprite_state()
         self._render_composite(
             self.canvas,
@@ -1574,7 +1708,7 @@ class SpriteEditor:
             pixel_size=pixel_size,
             draw_off_pixels=not stack_enabled,
             transparent_color="#aaaaaa",
-            outline="#666666",
+            outline=CANVAS_GRID_OUTLINE,
         )
     
     def _active_sprites(self):
@@ -1625,6 +1759,12 @@ class SpriteEditor:
                     child.configure(state=state)
                 except tk.TclError:
                     pass
+        if not enabled:
+            if hasattr(self, "_sprite_move_up_btn"):
+                self._sprite_move_up_btn.config(state=tk.DISABLED)
+                self._sprite_move_down_btn.config(state=tk.DISABLED)
+        else:
+            self._update_sprite_order_buttons()
 
     def select_sprite_index(self, index):
         if self.anim_preview_running:
@@ -1634,6 +1774,7 @@ class SpriteEditor:
         self.current_sprite = index
         self.current_color = self._active_sprites()[self.current_sprite]["color"]
         self._highlight_sprite_slot(index)
+        self._update_sprite_order_buttons()
         self.refresh_views()
 
     def rename_sprite(self, index, name):
@@ -1715,6 +1856,11 @@ class SpriteEditor:
 
         self.mode_indicator.config(text=text, bg=bg, fg=fg)
         self.canvas_frame.config(text=canvas_title)
+        if hasattr(self, "sprites_panel"):
+            if self.anim_edit_mode or self.anim_preview_running:
+                self.sprites_panel.config(text="Frame Sprites")
+            else:
+                self.sprites_panel.config(text="Project Sprites")
 
     def update_status(self):
         sprites = self._active_sprites()
@@ -1735,6 +1881,7 @@ class SpriteEditor:
             anim = self.animations[self.current_animation]
             txt += f" | ANIM: {anim['name']} ({len(anim['frames'])} frames)"
         self.status.config(text=txt)
+        self._update_color_indicator()
         self._update_frame_edit_controls()
         self._update_edit_mode_indicator()
     

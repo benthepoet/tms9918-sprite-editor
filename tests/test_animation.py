@@ -133,6 +133,43 @@ class SpriteEditorAnimationTests(unittest.TestCase):
             self.assertEqual(len(frame["sprites"]), 3)
             self.assertEqual(len(frame["stack_mask"]), 3)
 
+    def test_sprite_order_buttons_follow_selection(self):
+        editor = SpriteEditor(self.root, create_ui=True)
+        editor.init_sprites(2)
+        editor.rebuild_sprite_list()
+        editor.select_sprite_index(0)
+        self.assertEqual(str(editor._sprite_move_up_btn.cget("state")), "disabled")
+        self.assertEqual(str(editor._sprite_move_down_btn.cget("state")), "normal")
+        editor.select_sprite_index(1)
+        self.assertEqual(str(editor._sprite_move_up_btn.cget("state")), "normal")
+        self.assertEqual(str(editor._sprite_move_down_btn.cget("state")), "disabled")
+
+    def test_move_sprite_reorders_static_sprites(self):
+        self.editor.init_sprites(2)
+        self.editor.sprites[0]["name"] = "Bottom"
+        self.editor.sprites[1]["name"] = "Top"
+        self.editor.current_sprite = 0
+        self.editor.move_sprite(1)
+        self.assertEqual(self.editor.sprites[0]["name"], "Top")
+        self.assertEqual(self.editor.sprites[1]["name"], "Bottom")
+        self.assertEqual(self.editor.current_sprite, 1)
+
+    def test_move_sprite_reorders_frame_sprites_only(self):
+        self.editor.init_sprites(1)
+        self.editor.animations = [
+            {"name": "idle", "loop": True, "frames": [make_frame(slots=2)]}
+        ]
+        self.editor.animations[0]["frames"][0]["sprites"][0]["name"] = "Back"
+        self.editor.animations[0]["frames"][0]["sprites"][1]["name"] = "Front"
+        self.editor.current_animation = 0
+        self.editor.select_anim_frame(0)
+        self.editor.current_sprite = 0
+        self.editor.move_sprite(1)
+        snapshot = self.editor._frame_edit_snapshot
+        self.assertEqual(snapshot["sprites"][0]["name"], "Front")
+        self.assertEqual(snapshot["sprites"][1]["name"], "Back")
+        self.assertEqual(len(self.editor.sprites), 1)
+
     def test_add_sprite_in_frame_edit_does_not_change_static_sprites(self):
         self.editor.init_sprites(1)
         self.editor.animations = [

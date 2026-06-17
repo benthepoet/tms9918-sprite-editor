@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import tkinter as tk
 
-from sprite import SpriteEditor
+from sprite import CANVAS_BG, CANVAS_GRID_OUTLINE, CANVAS_OFF_PIXEL, SpriteEditor
 
 
 class RecordCanvas:
@@ -39,6 +39,12 @@ class RenderTests(unittest.TestCase):
     def _mask(self, values):
         return list(values)
 
+    def test_resolve_stack_indices_follows_list_order(self):
+        indices = self.editor._resolve_stack_indices(
+            [True, False, True], True, 0
+        )
+        self.assertEqual(indices, [0, 2])
+
     def test_resolve_stack_indices_single_mode(self):
         indices = self.editor._resolve_stack_indices([False, False], False, 1)
         self.assertEqual(indices, [1])
@@ -64,9 +70,10 @@ class RenderTests(unittest.TestCase):
             transparent_color="#aaaaaa",
             outline="#666666",
         )
-        self.assertEqual(len(canvas.rectangles), 64)
-        off_pixels = [rect for rect in canvas.rectangles if rect[4]["fill"] == "#555555"]
-        on_pixels = [rect for rect in canvas.rectangles if rect[4]["fill"] != "#555555"]
+        self.assertEqual(len(canvas.rectangles), 128)
+        overlay = canvas.rectangles[64:]
+        off_pixels = [rect for rect in overlay if rect[4]["fill"] == CANVAS_OFF_PIXEL]
+        on_pixels = [rect for rect in overlay if rect[4]["fill"] != CANVAS_OFF_PIXEL]
         self.assertEqual(len(off_pixels), 63)
         self.assertEqual(len(on_pixels), 1)
 
@@ -86,9 +93,28 @@ class RenderTests(unittest.TestCase):
             transparent_color="#aaaaaa",
             outline="#666666",
         )
-        fills = {rect[4]["fill"] for rect in canvas.rectangles}
-        self.assertEqual(len(canvas.rectangles), 2)
+        self.assertEqual(len(canvas.rectangles), 66)
+        on_pixels = [rect for rect in canvas.rectangles if rect[4]["fill"] != CANVAS_BG]
+        fills = {rect[4]["fill"] for rect in on_pixels}
+        self.assertEqual(len(on_pixels), 2)
         self.assertEqual(len(fills), 2)
+
+    def test_render_stacked_draws_grid_before_pixels(self):
+        canvas = RecordCanvas()
+        empty_sprite = {"pattern": [[0] * 8 for _ in range(8)], "color": 2}
+        self.editor._render_composite(
+            canvas,
+            [empty_sprite],
+            True,
+            [True],
+            0,
+            pixel_size=10,
+            transparent_color="#aaaaaa",
+        )
+        self.assertEqual(len(canvas.rectangles), 64)
+        self.assertTrue(
+            all(rect[4]["outline"] == CANVAS_GRID_OUTLINE for rect in canvas.rectangles)
+        )
 
     def test_preview_render_uses_empty_outline(self):
         canvas = RecordCanvas()
