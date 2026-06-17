@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "name": "TI-99/4A Default",
+  "description": "BYTE >XX directives with semicolon comments and timing metadata",
+  "dialect": {
+    "comment_prefix": ";",
+    "data_directive": "BYTE",
+    "hex_prefix": ">",
+    "hex_uppercase": true,
+    "hex_width": 2,
+    "value_separator": ",",
+    "bytes_per_line": 8,
+    "indent": ""
+  },
+  "labels": {
+    "case": "upper",
+    "max_length": 32,
+    "patterns": {
+      "animation": "{anim_name}",
+      "frame": "{anim_label}_F{frame_index:02d}",
+      "sprite": "{frame_label}_S{slot:02d}",
+      "duration_table": "{anim_label}_DUR",
+      "frame_count": "{anim_label}_NFRAMES"
+    }
+  },
+  "animation": {
+    "sections": {
+      "header": {
+        "enabled": true,
+        "lines": [
+          "{comment} Animation '{anim_name}' — {frame_count} frames"
+        ]
+      },
+      "frames": {
+        "enabled": true,
+        "per_frame": {
+          "enabled": true,
+          "label": { "enabled": false, "template": "{frame_label}" },
+          "lines": [
+            "{comment} Frame {frame_index}: duration={duration} screen frames"
+          ]
+        },
+        "per_sprite": {
+          "enabled": true,
+          "label": { "enabled": false, "template": "{sprite_label}" },
+          "comment": {
+            "enabled": true,
+            "template": "{comment} TMS9918 Sprite {slot:02d} {size}x{size} Color {color}"
+          },
+          "data": {
+            "enabled": true,
+            "bytes_per_line": 8,
+            "template": "{data_line}"
+          }
+        }
+      },
+      "duration_table": {
+        "enabled": true,
+        "label": { "enabled": false, "template": "{duration_table_label}" },
+        "comment": {
+          "enabled": true,
+          "template": "{comment} Durations (screen frames): {durations_csv}"
+        },
+        "data": { "enabled": false, "template": "{duration_line}" }
+      },
+      "frame_count": {
+        "enabled": false,
+        "label": { "enabled": true, "template": "{frame_count_label}" },
+        "comment": { "enabled": false, "template": "{comment} Frame count: {frame_count}" },
+        "data": { "enabled": true, "template": "{data_directive} {frame_count}" }
+      },
+      "footer": {
+        "enabled": true,
+        "lines": [
+          "{comment} Total cycle: {total_duration} screen frames (~{total_ms} ms)"
+        ]
+      }
+    }
+  },
+  "sprite": {
+    "sections": {
+      "label": { "enabled": false, "template": "{sprite_label}" },
+      "comment": {
+        "enabled": true,
+        "template": "{comment} TMS9918 Sprite {slot:02d} {size}x{size} Color {color}"
+      },
+      "data": {
+        "enabled": true,
+        "bytes_per_line": 8,
+        "template": "{data_line}"
+      }
+    }
+  }
+}

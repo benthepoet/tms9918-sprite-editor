@@ -1,0 +1,138 @@
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from asm_export import render_animation, render_frame_block, render_sprite
+from asm_format_schema import (
+    load_format_by_id,
+    list_formats,
+    sanitize_label,
+    validate_format,
+)
+from test_animation import make_frame
+
+
+class AsmFormatTests(unittest.TestCase):
+    def test_list_formats_loads_shipped_templates(self):
+        formats = list_formats()
+        ids = {format_id for format_id, _fmt in formats}
+        self.assertIn("ti99_default", ids)
+        self.assertIn("ti99_labeled", ids)
+        self.assertIn("generic_db", ids)
+        self.assertIn("ti99_frame_directory", ids)
+
+    def test_sanitize_label(self):
+        self.assertEqual(sanitize_label("walk right", case="upper"), "WALK_RIGHT")
+        self.assertEqual(sanitize_label("9up", case="upper"), "L_9UP")
+
+    def test_ti99_default_matches_legacy_animation_output(self):
+        frame0 = make_frame(slots=1, duration=4)
+        frame0["sprites"][0]["pattern"][0][0] = 1
+        frame1 = make_frame(slots=1, duration=8)
+        frame1["sprites"][0]["pattern"][1][0] = 1
+        anim = {"name": "walk", "loop": True, "frames": [frame0, frame1]}
+        expected = (
+            "; Animation 'walk' — 2 frames\n"
+            "; Frame 0: duration=4 screen frames\n"
+            "; TMS9918 Sprite 00 8x8 Color 2\n"
+            "BYTE >80,>00,>00,>00,>00,>00,>00,>00\n"
+            "\n\n"
+            "; Frame 1: duration=8 screen frames\n"
+            "; TMS9918 Sprite 00 8x8 Color 2\n"
+            "BYTE >80,>80,>00,>00,>00,>00,>00,>00\n"
+            "\n\n"
+            "; Durations (screen frames): 4, 8\n"
+            "; Total cycle: 12 screen frames (~200 ms)"
+        )
+        fmt = load_format_by_id("ti99_default")
+        self.assertEqual(render_animation(anim, 8, fmt), expected)
+
+    def test_ti99_labeled_emits_frame_and_duration_labels(self):
+        frame = make_frame(slots=1, duration=6)
+        frame["sprites"][0]["pattern"][0][0] = 1
+        anim = {"name": "walk", "loop": True, "frames": [frame]}
+        fmt = load_format_by_id("ti99_labeled")
+        asm = render_animation(anim, 8, fmt)
+        self.assertIn("WALK_F00:", asm)
+        self.assertIn("WALK_DUR:", asm)
+        self.assertIn("BYTE 6", asm)
+
+    def test_generic_db_uses_db_and_dollar_hex(self):
+        frame = make_frame(slots=1, duration=4)
+        frame["sprites"][0]["pattern"][0][0] = 1
+        anim = {"name": "hero", "loop": True, "frames": [frame]}
+        fmt = load_format_by_id("generic_db")
+        asm = render_animation(anim, 8, fmt)
+        self.assertIn("db $80", asm)
+        self.assertNotIn("BYTE", asm)
+
+    def test_validate_format_rejects_unknown_version(self):
+        with self.assertRaises(ValueError):
+            validate_format({"version": 9, "name": "bad", "dialect": {}, "animation": {}, "sprite": {}})
+
+    def test_ti99_frame_directory_matches_anim_header_structure(self):
+        frame = make_frame(slots=1, duration=32)
+        frame["sprites"][0]["pattern"][2][2] = 1
+        frame["sprites"][0]["pattern"][2][3] = 1
+        anim = {"name": "ANIM_0", "loop": True, "frames": [frame]}
+        fmt = load_format_by_id("ti99_frame_directory")
+        asm = render_animation(anim, 8, fmt)
+        self.assertEqual(
+            asm.splitlines()[:3],
+            [
+                "ANIM_0",
+                "    BYTE >01    ; Frame count",
+                "    DATA SPR0,>0020 ; Frame 0 address and duration",
+            ],
+        )
+        sprite_section = asm.split("\n\n", 1)[1]
+        self.assertTrue(sprite_section.startswith("SPR0\n"))
+        self.assertIn("    BYTE ", sprite_section)
+
+    def test_ti99_frame_directory_assigns_distinct_sprite_labels(self):
+        frame0 = make_frame(slots=2, duration=4)
+        frame1 = make_frame(slots=2, duration=8)
+        anim = {"name": "ANIM_0", "loop": True, "frames": [frame0, frame1]}
+        fmt = load_format_by_id("ti99_frame_directory")
+        asm = render_animation(anim, 8, fmt)
+        labels = [line for line in asm.splitlines() if line.startswith("SPR")]
+        self.assertEqual(labels, ["SPR0", "SPR1", "SPR2", "SPR3"])
+        directory_lines = [
+            line
+            for line in asm.splitlines()
+            if line.strip().startswith("DATA ")
+        ]
+        self.assertEqual(
+            directory_lines,
+            [
+                "    DATA SPR0,>0004 ; Frame 0 address and duration",
+                "    DATA SPR2,>0008 ; Frame 1 address and duration",
+            ],
+        )
+
+    def test_frame_directory_format_renders_frame_block_without_frame_index(self):
+        frame = make_frame(slots=1, duration=32)
+        fmt = load_format_by_id("ti99_frame_directory")
+        asm = render_frame_block(
+            frame["sprites"],
+            frame["stack_mask"],
+            size=8,
+            fmt=fmt,
+            header_lines=["; editing frame 0"],
+        )
+        self.assertIn("SPR0", asm)
+        self.assertIn("    BYTE ", asm)
+
+    def test_render_sprite_uses_format_dialect(self):
+        sprite = make_frame(slots=1)["sprites"][0]
+        sprite["pattern"][0][0] = 1
+        fmt = load_format_by_id("generic_db")
+        asm = render_sprite(sprite, 0, 8, fmt)
+        self.assertIn("db $80", asm)
+
+
+if __name__ == "__main__":
+    unittest.main()

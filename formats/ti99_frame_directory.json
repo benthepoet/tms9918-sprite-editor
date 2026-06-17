@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "name": "TI-99/4A Frame Directory",
+  "description": "Animation header with frame count and per-frame DATA address/duration entries before labeled sprite data",
+  "dialect": {
+    "comment_prefix": ";",
+    "data_directive": "BYTE",
+    "hex_prefix": ">",
+    "hex_uppercase": true,
+    "hex_width": 2,
+    "value_separator": ",",
+    "bytes_per_line": 8,
+    "indent": "    ",
+    "duration_hex_width": 4,
+    "frame_count_hex_width": 2
+  },
+  "labels": {
+    "case": "upper",
+    "max_length": 32,
+    "patterns": {
+      "animation": "{anim_name}",
+      "frame": "{anim_label}_F{frame_index:02d}",
+      "sprite": "SPR{sprite_index}",
+      "duration_table": "{anim_label}_DUR",
+      "frame_count": "{anim_label}_NFRAMES"
+    }
+  },
+  "animation": {
+    "sections": {
+      "header": {
+        "enabled": false,
+        "lines": [
+          "{comment} Animation '{anim_name}'"
+        ]
+      },
+      "frame_directory": {
+        "enabled": true,
+        "label": { "enabled": true, "template": "{anim_label}", "colon": false },
+        "frame_count": {
+          "enabled": true,
+          "template": "{indent}{data_directive} {frame_count_hex}    {comment} Frame count"
+        },
+        "per_frame": {
+          "enabled": true,
+          "template": "{indent}DATA {sprite_label},{duration_hex} {comment} Frame {frame_index} address and duration"
+        }
+      },
+      "frames": {
+        "enabled": true,
+        "per_frame": {
+          "enabled": false,
+          "label": { "enabled": false, "template": "{frame_label}" },
+          "lines": [
+            "{comment} Frame {frame_index}: duration={duration} screen frames"
+          ]
+        },
+        "per_sprite": {
+          "enabled": true,
+          "label": { "enabled": true, "template": "{sprite_label}", "colon": false },
+          "comment": { "enabled": false, "template": "" },
+          "data": {
+            "enabled": true,
+            "bytes_per_line": 8,
+            "template": "{indent}{data_line}"
+          }
+        }
+      },
+      "duration_table": {
+        "enabled": false,
+        "label": { "enabled": false, "template": "{duration_table_label}" },
+        "comment": { "enabled": false, "template": "" },
+        "data": { "enabled": false, "template": "" }
+      },
+      "frame_count": {
+        "enabled": false,
+        "label": { "enabled": false, "template": "{frame_count_label}" },
+        "comment": { "enabled": false, "template": "" },
+        "data": { "enabled": false, "template": "" }
+      },
+      "footer": {
+        "enabled": false,
+        "lines": [
+          "{comment} Total cycle: {total_duration} screen frames"
+        ]
+      }
+    }
+  },
+  "sprite": {
+    "sections": {
+      "label": { "enabled": false, "template": "{sprite_label}" },
+      "comment": {
+        "enabled": true,
+        "template": "{comment} TMS9918 Sprite {slot:02d} {size}x{size} Color {color}"
+      },
+      "data": {
+        "enabled": true,
+        "bytes_per_line": 8,
+        "template": "{data_line}"
+      }
+    }
+  }
+}

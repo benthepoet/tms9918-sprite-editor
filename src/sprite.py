@@ -5,6 +5,13 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+from asm_export import (
+    build_sprite_index_map,
+    render_animation,
+    render_frame_block,
+    render_sprite,
+)
+from asm_format_schema import default_format, list_formats
 from binary_export import encode_animation_binary, encode_panel_binary, pattern_to_bytes
 from animation_schema import (
     MAX_FILE_BYTES_WARN,
@@ -99,6 +106,8 @@ class SpriteEditor:
         self._preview_fps_ticks = 0
         self._preview_fps_window_start = 0.0
         self._suppress_anim_ui_events = False
+        self._export_format_id, self._export_format = default_format()
+        self._export_formats = list_formats()
 
         if create_ui:
             self.create_ui()
@@ -316,6 +325,18 @@ class SpriteEditor:
 
         asm_frame = ttk.LabelFrame(self.canvas_frame, text="Assembly Export")
         asm_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+
+        asm_format_row = ttk.Frame(asm_frame)
+        asm_format_row.pack(fill="x", padx=5, pady=(5, 0))
+        ttk.Label(asm_format_row, text="Format:").pack(side=tk.LEFT)
+        self.asm_format_combo = ttk.Combobox(
+            asm_format_row,
+            state="readonly",
+            values=[fmt["name"] for _fmt_id, fmt in self._export_formats],
+        )
+        self.asm_format_combo.pack(side=tk.LEFT, fill="x", expand=True, padx=(6, 0))
+        self._set_asm_format_combo_selection(self._export_format_id)
+        self.asm_format_combo.bind("<<ComboboxSelected>>", self._on_export_format_selected)
 
         self.asm_text = tk.Text(
             asm_frame, height=6, font=("Courier", 10), wrap=tk.NONE, bg=PANEL_TEXT_BG
@@ -2172,17 +2193,35 @@ class SpriteEditor:
         messagebox.showinfo("Export Binary", f"Saved {len(data)} bytes to\n{path}")
         return True
 
+    def _set_asm_format_combo_selection(self, format_id):
+        if not hasattr(self, "asm_format_combo"):
+            return
+        for index, (candidate_id, fmt) in enumerate(self._export_formats):
+            if candidate_id == format_id:
+                self.asm_format_combo.current(index)
+                return
+        if self._export_formats:
+            self.asm_format_combo.current(0)
+
+    def _on_export_format_selected(self, _event=None):
+        selection = self.asm_format_combo.get()
+        for format_id, fmt in self._export_formats:
+            if fmt["name"] == selection:
+                self._export_format_id = format_id
+                self._export_format = fmt
+                self.update_asm_export()
+                return
+
+    def _active_export_format(self):
+        return self._export_format
+
     def _build_asm_for_sprite_data(self, sprite, slot_index):
-        pattern = sprite["pattern"]
-        col = sprite["color"]
-        size = self.sprite_size_mode
-        bytes_list = self._pattern_to_bytes(pattern, size)
-        asm = f"; TMS9918 Sprite {slot_index:02d} {size}x{size} Color {col}\n"
-        for i in range(0, len(bytes_list), 8):
-            chunk = bytes_list[i:i + 8]
-            hex_vals = ",".join(f">{b:02X}" for b in chunk)
-            asm += f"BYTE {hex_vals}\n"
-        return asm
+        return render_sprite(
+            sprite,
+            slot_index,
+            self.sprite_size_mode,
+            self._active_export_format(),
+        )
 
     def build_asm_text(self, sprite_index=None):
         if sprite_index is None:
@@ -2191,40 +2230,39 @@ class SpriteEditor:
         return self._build_asm_for_sprite_data(sprites[sprite_index], sprite_index)
 
     def build_frame_asm(self, sprites, stack_mask, header=""):
-        indices = self._resolve_stack_indices(stack_mask)
-        parts = []
-        if header:
-            parts.append(header.rstrip("\n"))
-        for slot_idx in indices:
-            parts.append(self._build_asm_for_sprite_data(sprites[slot_idx], slot_idx))
-        return "\n".join(parts)
+        header_lines = [line for line in header.splitlines() if line] if header else None
+        return render_frame_block(
+            sprites,
+            stack_mask,
+            size=self.sprite_size_mode,
+            fmt=self._active_export_format(),
+            header_lines=header_lines,
+        )
 
     def build_animation_asm(self, anim_index):
-        anim = self.animations[anim_index]
-        frames = anim.get("frames", [])
-        lines = [f"; Animation '{anim['name']}' — {len(frames)} frames"]
-        durations = []
-        for index, frame in enumerate(frames):
-            durations.append(frame["duration"])
-            lines.append(f"; Frame {index}: duration={frame['duration']} screen frames")
-            frame_asm = self.build_frame_asm(frame["sprites"], frame["stack_mask"])
-            if frame_asm:
-                lines.append(frame_asm)
-            lines.append("")
-        total_sf = sum(durations)
-        lines.append(f"; Durations (screen frames): {', '.join(str(d) for d in durations)}")
-        lines.append(
-            f"; Total cycle: {total_sf} screen frames (~{total_sf / 59.94 * 1000:.0f} ms)"
+        return render_animation(
+            self.animations[anim_index],
+            self.sprite_size_mode,
+            self._active_export_format(),
         )
-        return "\n".join(lines)
 
     def _build_asm_panel_text(self):
+        fmt = self._active_export_format()
+        comment = fmt["dialect"]["comment_prefix"]
         if self.anim_preview_running and self.current_animation is not None:
             frames = self.animations[self.current_animation]["frames"]
             frame = frames[self._anim_preview_index]
-            header = f"; Preview frame {self._anim_preview_index + 1}/{len(frames)}\n"
-            return self.build_frame_asm(
-                frame["sprites"], frame["stack_mask"], header=header
+            header_lines = [
+                f"{comment} Preview frame {self._anim_preview_index + 1}/{len(frames)}"
+            ]
+            return render_frame_block(
+                frame["sprites"],
+                frame["stack_mask"],
+                size=self.sprite_size_mode,
+                fmt=fmt,
+                header_lines=header_lines,
+                frame_index=self._anim_preview_index,
+                sprite_indices=build_sprite_index_map(frames),
             )
 
         if self.anim_edit_mode and self._frame_edit_snapshot is not None:
@@ -2232,12 +2270,21 @@ class SpriteEditor:
             anim_name = ""
             if self.current_animation is not None:
                 anim_name = self.animations[self.current_animation]["name"]
-            header = (
-                f"; Animation '{anim_name}' / Frame {self.current_anim_frame} "
-                f"(duration={snapshot['duration']} sf)\n"
-            )
-            return self.build_frame_asm(
-                snapshot["sprites"], snapshot["stack_mask"], header=header
+            header_lines = [
+                (
+                    f"{comment} Animation '{anim_name}' / Frame {self.current_anim_frame} "
+                    f"(duration={snapshot['duration']} sf)"
+                )
+            ]
+            frames = self.animations[self.current_animation]["frames"]
+            return render_frame_block(
+                snapshot["sprites"],
+                snapshot["stack_mask"],
+                size=self.sprite_size_mode,
+                fmt=fmt,
+                header_lines=header_lines,
+                frame_index=self.current_anim_frame,
+                sprite_indices=build_sprite_index_map(frames),
             )
 
         asm = self.build_asm_text()
@@ -2247,7 +2294,10 @@ class SpriteEditor:
             and self.animations[self.current_animation]["frames"]
         ):
             anim = self.animations[self.current_animation]
-            header = f"; Animation '{anim['name']}' ({len(anim['frames'])} frames)\n"
+            header = (
+                f"{comment} Animation '{anim['name']}' "
+                f"({len(anim['frames'])} frames)\n"
+            )
             asm = header + asm
         return asm
 

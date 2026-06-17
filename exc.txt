@@ -1,0 +1,40 @@
+Exception in Tkinter callback
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/tkinter/__init__.py", line 2093, in __call__
+    return self.func(*args)
+           ~~~~~~~~~^^^^^^^
+  File "/home/benh/Source/test/src/sprite.py", line 2207, in _on_export_format_selected
+    self.update_asm_export()
+    ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/benh/Source/test/src/sprite.py", line 2297, in update_asm_export
+    asm = self._build_asm_panel_text()
+  File "/home/benh/Source/test/src/sprite.py", line 2272, in _build_asm_panel_text
+    return render_frame_block(
+        snapshot["sprites"],
+    ...<3 lines>...
+        header_lines=header_lines,
+    )
+  File "/home/benh/Source/test/src/asm_export.py", line 492, in render_frame_block
+    _render_sprite_lines(
+    ~~~~~~~~~~~~~~~~~~~~^
+        sprites[slot],
+        ^^^^^^^^^^^^^^
+    ...<4 lines>...
+        sprite_sections=sprite_sections,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/benh/Source/test/src/asm_export.py", line 185, in _render_sprite_lines
+    context["sprite_label"] = _format_label(
+                              ~~~~~~~~~~~~~^
+        label_settings["patterns"].get("sprite", "{frame_label}_S{slot:02d}"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        context,
+        ^^^^^^^^
+        label_settings,
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/benh/Source/test/src/asm_export.py", line 42, in _format_label
+    rendered = pattern.format(**context)
+KeyError: 'frame_index'
