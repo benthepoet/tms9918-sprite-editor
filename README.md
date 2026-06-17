@@ -1,17 +1,19 @@
-# TI-99/4A Sprite Editor
+# TMS9918 Sprite Editor
 
-A desktop sprite editor for creating 8×8 and 16×16 pixel art for the [TI-99/4A](https://en.wikipedia.org/wiki/TI-99/4A) home computer. Draw sprites in the authentic 16-color palette, layer multiple sprites with stacked editing, and export patterns as assembly `BYTE` directives.
+A desktop sprite editor for the [TMS9918](https://en.wikipedia.org/wiki/TMS9918) VDP — create 8×8 and 16×16 sprite patterns in the authentic 16-color palette, layer multiple sprites with stacked editing, build animations with VDP-timed preview, and export patterns as assembly `BYTE` directives. Commonly used for [TI-99/4A](https://en.wikipedia.org/wiki/TI-99/4A) development and other TMS9918-based systems.
 
 Built with Python and Tkinter — no extra dependencies required.
 
 ## Features
 
-- **TI-99/4A palette** — All 16 system colors, including transparent
-- **8×8 and 16×16 modes** — Switch sprite size from the Mode menu (clears sprites)
+- **TMS9918 palette** — All 16 VDP colors, including transparent
+- **8×8 and 16×16 modes** — Switch sprite size from the Mode menu (clears sprites and animations)
 - **Dynamic sprite list** — Start with one sprite; add or remove slots as needed
-- **Stacked editing** — Overlay multiple sprites on the canvas and preview to compose layered graphics
-- **Project files** — Save and load work as JSON
-- **Export** — Copy assembly output to the clipboard for use in your programs
+- **Stacked editing** — Overlay multiple sprites on the canvas to compose layered graphics
+- **Animations** — Named frame sequences with per-frame duration in VDP screen frames (~60/sec NTSC)
+- **Animation preview** — Play/stop with hardware-aligned timing on the main canvas
+- **Project files** — Save and load work as JSON (v2 with animations)
+- **Export** — Live assembly panel plus full animation export to clipboard
 
 ## Requirements
 
@@ -28,12 +30,12 @@ python3 src/sprite.py
 
 | Area | Description |
 |------|-------------|
-| **TI Palette** | Click a swatch to set the active color. `T` is transparent (erases pixels). |
+| **TMS9918 Palette** | Click a swatch to set the active color. `T` is transparent (erases pixels). |
 | **Drawing Canvas** | Main editing area. Shows stacked layers when stacking is enabled. |
-| **Assembly Export** | Live assembly output for the current sprite, updated as you edit. |
-| **Sprite Slots** | Select the active sprite. Checkboxes choose which sprites appear in the stack. Use Add/Remove to manage slots. |
-| **Stacked Preview** | Live preview of the composed result. |
-| **Status bar** | Current sprite, size, color, and stacking state. |
+| **Assembly Export** | Live assembly output, updated as you edit or preview. |
+| **Sprite Slots** | Select the active sprite. Checkboxes choose which sprites appear in the stack. |
+| **Animations** | Create animations, manage frames, commit/discard edits, preview playback. |
+| **Status bar** | Sprite info, animation context, and preview progress. |
 
 ## Controls
 
@@ -44,8 +46,12 @@ python3 src/sprite.py
 | Select color | Click palette swatch |
 | Select sprite | Click entry in sprite list |
 | Toggle stack layer | Checkbox next to sprite slot |
+| Capture animation frame | `Ctrl+Shift+F` |
+| Copy assembly | `Ctrl+Shift+C` |
+| Toggle preview play/stop | `Space` (animation selected) |
+| Cancel frame edit / stop preview | `Escape` |
 
-### Buttons
+### Sprite Buttons
 
 - **Clear Sprite** — Reset the current sprite to empty
 - **Fill Sprite** — Fill the current sprite with the active color
@@ -53,35 +59,84 @@ python3 src/sprite.py
 - **Remove Sprite** — Delete the current sprite (at least one must remain)
 - **Copy to Next** — Duplicate the current sprite into the next slot
 
+### Animation Workflow
+
+1. Click **+** in the Animations panel to create an animation.
+2. Draw on the canvas (static mode) or edit sprite slots with stacking as needed.
+3. Click **+ Frame** or press `Ctrl+Shift+F` to capture the current state into a new frame.
+4. Click a frame in the list to edit it. Use **Commit Frame** / **Discard Changes** to save or revert edits.
+5. Set **Duration (sf)** per frame — hold time in VDP screen frames (1–255).
+6. Press **▶ Play** or `Space` to preview on the main canvas. Uncheck **Loop animation** to play once.
+7. Use **Animation → Export Animation ASM** to copy the full sequence with timing comments.
+
+**Escape** discards uncommitted frame edits and returns to static editing. **Animation → Exit Animation Mode** returns to static editing (prompts if there are unsaved changes).
+
 ## File Menu
 
 | Command | Description |
 |---------|-------------|
-| **New** | Clear all sprites and start fresh |
+| **New** | Clear all sprites and animations |
 | **Load Project** | Open a `.json` project file |
 | **Save Project** | Save the current project as JSON |
-| **Copy Assembly to Clipboard** | Copy the assembly output for the current sprite (`Ctrl+Shift+C`) |
+| **Copy Assembly to Clipboard** | Copy the assembly panel output (`Ctrl+Shift+C`) |
 
-## Project Format
+## Animation Menu
 
-Projects are saved as JSON:
+| Command | Description |
+|---------|-------------|
+| **New Animation** | Create a new named animation |
+| **Rename Animation…** | Rename the selected animation |
+| **Capture Frame** | Add a frame from current editor state (`Ctrl+Shift+F`) |
+| **Duplicate Animation** | Copy the selected animation |
+| **Export Animation ASM** | Copy all frames with timing comments to clipboard |
+| **Exit Animation Mode** | Return to static editing (prompts if there are unsaved changes) |
+
+## Project Format (JSON v2)
 
 ```json
 {
+  "version": 2,
   "mode": 16,
   "sprites": [
     {
       "pattern": [[0, 1, ...], ...],
       "color": 2
     }
+  ],
+  "animations": [
+    {
+      "name": "walk",
+      "loop": true,
+      "frames": [
+        {
+          "duration": 4,
+          "stack_enabled": true,
+          "stack_mask": [true, false],
+          "sprites": [
+            {"pattern": [[...]], "color": 2}
+          ]
+        }
+      ]
+    }
   ]
 }
 ```
 
+- `version` — `2` for projects with animations; older files without `version` load as v1 (no animations)
 - `mode` — Sprite dimensions: `8` or `16`
-- `sprites` — Array of sprite objects, each with a 2D `pattern` (0 = off, 1 = on) and a `color` index (0–15)
+- `sprites` — Static sprite slots used when not editing an animation frame
+- `animations` — Named sequences; each frame is a full snapshot of all slots plus stack configuration
+
+Each animation frame stores:
+
+- `duration` — Hold time in VDP screen frames (NTSC ~60/sec)
+- `stack_enabled` — Whether stacking was on when captured
+- `stack_mask` — Which sprite slots were visible in the stack
+- `sprites` — Deep copy of every slot's pattern and color at capture time
 
 ## Export Format
+
+### Single sprite
 
 Sprites export as `BYTE` directives with 8 hex values per line. An 8×8 sprite is 8 bytes (one line, top to bottom). A 16×16 sprite is 32 bytes (four lines) in TMS9918 quadrant order:
 
@@ -91,17 +146,46 @@ Sprites export as `BYTE` directives with 8 hex values per line. An 8×8 sprite i
 4. Bottom-right (rows 8–15, columns 8–15)
 
 ```
-BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00   ; top-left
-BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00   ; bottom-left
-BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00   ; top-right
-BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00   ; bottom-right
+; TMS9918 Sprite 00 16x16 Color 2
+BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
+BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
+BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
+BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
 ```
 
-Assembly output is shown live below the canvas. Press **Ctrl+Shift+C** or use **File → Copy Assembly to Clipboard** to copy it. You can also select text directly from the panel.
+### Animation export
+
+**Animation → Export Animation ASM** produces all frames with timing metadata. Only **stacked** sprite slots are exported per frame (matching what you see in the canvas composite):
+
+```asm
+; Animation 'walk' — 2 frames
+; Frame 0: duration=4 screen frames
+; TMS9918 Sprite 00 8x8 Color 2
+BYTE >80,>00,>00,>00,>00,>00,>00,>00
+
+; Frame 1: duration=8 screen frames
+; TMS9918 Sprite 00 8x8 Color 2
+BYTE >40,>00,>00,>00,>00,>00,>00,>00
+
+; Durations (screen frames): 4, 8
+; Total cycle: 12 screen frames (~200 ms)
+```
+
+The live assembly panel below the canvas shows the current sprite (or previewed frame). Use **Ctrl+Shift+C** or select text directly from the panel.
 
 ## Stacking
 
-When **Enable Stacking** is on, the canvas and preview composite all checked sprite slots (plus the current sprite) from bottom to top. Uncheck layers to hide them, or disable stacking entirely to edit a single sprite in isolation.
+When **Enable Stacking** is on, the canvas composites all checked sprite slots (plus the current sprite) from bottom to top. Animation frames capture this stack configuration so layered characters animate correctly.
+
+## Debug
+
+Set `SPRITE_EDITOR_DEBUG=1` when launching to enable debug logging and approximate screen-frame rate in the status bar during preview.
+
+## Tests
+
+```bash
+python3 -m unittest discover -s tests
+```
 
 ## License
 
