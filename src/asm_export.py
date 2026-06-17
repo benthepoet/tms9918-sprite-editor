@@ -1,5 +1,6 @@
 import re
 
+from animation_schema import sprite_display_name
 from asm_format_schema import sanitize_label
 from binary_export import pattern_to_bytes
 
@@ -93,7 +94,63 @@ def _format_decimal_line(values, fmt: dict, *, bytes_per_line: int = 16) -> str:
 
 
 def _sprite_name(sprite: dict, slot: int) -> str:
-    return sprite.get("name") or f"Sprite {slot:02d}"
+    return sprite_display_name(sprite, slot)
+
+
+def _sprite_label_from_sprite(
+    sprite: dict,
+    slot: int,
+    fmt: dict,
+    *,
+    frame_index: int | None = None,
+    sprite_index: int | None = None,
+    frame_label: str = "",
+    anim_label: str = "",
+) -> str:
+    label_settings = _label_settings(fmt)
+    resolved_frame_index = 0 if frame_index is None else frame_index
+    if sprite_index is not None:
+        resolved_sprite_index = sprite_index
+    elif frame_index is not None:
+        resolved_sprite_index = resolved_frame_index
+    else:
+        resolved_sprite_index = slot
+    context = {
+        "sprite_name": _sprite_name(sprite, slot),
+        "slot": slot,
+        "slot02d": f"{slot:02d}",
+        "frame_index": resolved_frame_index,
+        "frame_number": resolved_frame_index + 1,
+        "sprite_index": resolved_sprite_index,
+        "frame_label": frame_label,
+        "anim_label": anim_label,
+    }
+    return _format_label(
+        label_settings["patterns"].get("sprite", "{sprite_name}"),
+        context,
+        label_settings,
+    )
+
+
+def _unique_sprite_label(
+    label: str,
+    *,
+    used_sprite_labels: set[str] | None,
+    frame_index: int,
+    slot: int,
+) -> str:
+    if used_sprite_labels is None:
+        return label
+    if label not in used_sprite_labels:
+        used_sprite_labels.add(label)
+        return label
+    candidate = f"{label}_F{frame_index:02d}"
+    if candidate not in used_sprite_labels:
+        used_sprite_labels.add(candidate)
+        return candidate
+    candidate = f"{label}_F{frame_index:02d}_S{slot:02d}"
+    used_sprite_labels.add(candidate)
+    return candidate
 
 
 def _render_lines(lines, context: dict) -> list[str]:
@@ -103,6 +160,44 @@ def _render_lines(lines, context: dict) -> list[str]:
 def _append_label_line(lines: list[str], label_line: str, *, colon: bool = True) -> None:
     label_line = label_line.rstrip(":")
     lines.append(f"{label_line}:" if colon else label_line)
+
+
+def build_sprite_label_map(frames, fmt: dict, anim_label: str = "") -> dict[tuple[int, int], str]:
+    used_sprite_labels: set[str] = set()
+    labels: dict[tuple[int, int], str] = {}
+    sprite_indices = build_sprite_index_map(frames)
+    for frame_index, frame in enumerate(frames):
+        sprites = frame.get("sprites", [])
+        stack_mask = frame.get("stack_mask", [])
+        frame_label = _format_label(
+            _label_settings(fmt)["patterns"].get(
+                "frame", "{anim_label}_F{frame_index:02d}"
+            ),
+            {
+                "anim_label": anim_label,
+                "frame_index": frame_index,
+                "frame_number": frame_index + 1,
+            },
+            _label_settings(fmt),
+        )
+        for slot in resolve_stack_indices(stack_mask):
+            sprite = sprites[slot]
+            base_label = _sprite_label_from_sprite(
+                sprite,
+                slot,
+                fmt,
+                frame_index=frame_index,
+                sprite_index=sprite_indices.get((frame_index, slot)),
+                frame_label=frame_label,
+                anim_label=anim_label,
+            )
+            labels[(frame_index, slot)] = _unique_sprite_label(
+                base_label,
+                used_sprite_labels=used_sprite_labels,
+                frame_index=frame_index,
+                slot=slot,
+            )
+    return labels
 
 
 def build_sprite_index_map(frames) -> dict[tuple[int, int], int]:
@@ -158,10 +253,14 @@ def _sprite_label_context(
         sprite_index if sprite_index is not None else frame_index
     )
     context["sprite_index"] = resolved_sprite_index
-    context["sprite_label"] = _format_label(
-        label_settings["patterns"].get("sprite", "{frame_label}_S{slot:02d}"),
-        context,
-        label_settings,
+    context["sprite_label"] = _sprite_label_from_sprite(
+        sprites[slot],
+        slot,
+        fmt,
+        frame_index=frame_index,
+        sprite_index=sprite_index,
+        frame_label=context["frame_label"],
+        anim_label=anim_label,
     )
     return context
 
@@ -221,13 +320,26 @@ def _render_sprite_lines(
     frame_index: int | None = None,
     sprite_index: int | None = None,
     anim_label: str = "",
+    sprite_label: str | None = None,
 ) -> list[str]:
-    label_settings = _label_settings(fmt)
     byte_values = list(pattern_to_bytes(sprite["pattern"], size))
     resolved_frame_index = 0 if frame_index is None else frame_index
-    resolved_sprite_index = (
-        sprite_index if sprite_index is not None else resolved_frame_index
-    )
+    if sprite_index is not None:
+        resolved_sprite_index = sprite_index
+    elif frame_index is not None:
+        resolved_sprite_index = resolved_frame_index
+    else:
+        resolved_sprite_index = slot
+    if sprite_label is None:
+        sprite_label = _sprite_label_from_sprite(
+            sprite,
+            slot,
+            fmt,
+            frame_index=frame_index,
+            sprite_index=sprite_index,
+            frame_label=frame_label,
+            anim_label=anim_label,
+        )
     context = {
         **_dialect_context(fmt),
         "slot": slot,
@@ -241,12 +353,8 @@ def _render_sprite_lines(
         "frame_number": resolved_frame_index + 1,
         "anim_label": anim_label,
         "sprite_index": resolved_sprite_index,
+        "sprite_label": sprite_label,
     }
-    context["sprite_label"] = _format_label(
-        label_settings["patterns"].get("sprite", "{frame_label}_S{slot:02d}"),
-        context,
-        label_settings,
-    )
 
     lines = []
     label_section = sprite_sections.get("label", {})
@@ -297,6 +405,7 @@ def render_frame(
     duration: int,
     anim_label: str,
     sprite_indices: dict[tuple[int, int], int] | None = None,
+    sprite_labels: dict[tuple[int, int], str] | None = None,
 ) -> list[str]:
     frame_sections = fmt["animation"]["sections"]["frames"]
     if not _section_enabled(frame_sections, default=True):
@@ -344,6 +453,11 @@ def render_frame(
                         sprite_indices,
                     ),
                     anim_label=anim_label,
+                    sprite_label=(
+                        sprite_labels.get((frame_index, slot))
+                        if sprite_labels is not None
+                        else None
+                    ),
                 )
             )
     return lines
@@ -357,6 +471,7 @@ def _render_frame_directory(
     anim_context: dict,
     frame_directory: dict,
     sprite_indices: dict[tuple[int, int], int] | None = None,
+    sprite_labels: dict[tuple[int, int], str] | None = None,
 ) -> list[str]:
     lines = []
     label_section = frame_directory.get("label", {})
@@ -389,16 +504,25 @@ def _render_frame_directory(
             "{indent}DATA {sprite_label},{duration_hex}{comment} Frame {frame_index} address and duration",
         )
         for index, frame in enumerate(frames):
+            stack_mask = frame.get("stack_mask", [])
+            slots = resolve_stack_indices(stack_mask)
+            primary_slot = slots[0] if slots else 0
             frame_context = _build_frame_context(
                 frame_index=index,
                 duration=frame.get("duration", 4),
                 anim_label=anim_context["anim_label"],
                 fmt=fmt,
                 sprites=frame.get("sprites", []),
-                stack_mask=frame.get("stack_mask", []),
+                stack_mask=stack_mask,
                 size=size,
                 sprite_indices=sprite_indices,
+                slot=primary_slot,
             )
+            if sprite_labels is not None:
+                frame_context["sprite_label"] = sprite_labels.get(
+                    (index, primary_slot),
+                    frame_context["sprite_label"],
+                )
             lines.append(template.format(**frame_context))
 
     if lines:
@@ -429,6 +553,7 @@ def render_animation(animation: dict, size: int, fmt: dict) -> str:
         label_settings,
     )
     sprite_indices = build_sprite_index_map(frames)
+    sprite_labels = build_sprite_label_map(frames, fmt, anim_context["anim_label"])
 
     lines = []
     header = sections.get("header", {})
@@ -445,6 +570,7 @@ def render_animation(animation: dict, size: int, fmt: dict) -> str:
                 anim_context=anim_context,
                 frame_directory=frame_directory,
                 sprite_indices=sprite_indices,
+                sprite_labels=sprite_labels,
             )
         )
 
@@ -460,6 +586,7 @@ def render_animation(animation: dict, size: int, fmt: dict) -> str:
                 duration=frame.get("duration", 4),
                 anim_label=anim_context["anim_label"],
                 sprite_indices=sprite_indices,
+                sprite_labels=sprite_labels,
             )
             if frame_lines:
                 lines.extend(frame_lines)
@@ -543,6 +670,7 @@ def render_frame_block(
     duration: int | None = None,
     anim_label: str = "",
     sprite_indices: dict[tuple[int, int], int] | None = None,
+    sprite_labels: dict[tuple[int, int], str] | None = None,
 ) -> str:
     lines = []
     if header_lines:
@@ -558,10 +686,12 @@ def render_frame_block(
                 duration=duration,
                 anim_label=anim_label,
                 sprite_indices=sprite_indices,
+                sprite_labels=sprite_labels,
             )
         )
     else:
         sprite_sections = fmt["animation"]["sections"]["frames"]["per_sprite"]
+        resolved_frame_index = 0 if frame_index is None else frame_index
         for slot in resolve_stack_indices(stack_mask):
             lines.extend(
                 _render_sprite_lines(
@@ -578,6 +708,11 @@ def render_frame_block(
                         sprite_indices,
                     ),
                     anim_label=anim_label,
+                    sprite_label=(
+                        sprite_labels.get((resolved_frame_index, slot))
+                        if sprite_labels is not None
+                        else None
+                    ),
                 )
             )
     return "\n".join(lines)

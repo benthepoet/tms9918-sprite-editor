@@ -7,11 +7,18 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from asm_export import (
     build_sprite_index_map,
+    build_sprite_label_map,
     render_animation,
     render_frame_block,
     render_sprite,
 )
-from asm_format_schema import default_format, list_formats
+from asm_format_schema import (
+    default_format,
+    format_animation_only,
+    list_formats,
+    load_format_by_id,
+    sanitize_label,
+)
 from binary_export import encode_animation_binary, encode_panel_binary, pattern_to_bytes
 from animation_schema import (
     MAX_FILE_BYTES_WARN,
@@ -329,14 +336,10 @@ class SpriteEditor:
         asm_format_row = ttk.Frame(asm_frame)
         asm_format_row.pack(fill="x", padx=5, pady=(5, 0))
         ttk.Label(asm_format_row, text="Format:").pack(side=tk.LEFT)
-        self.asm_format_combo = ttk.Combobox(
-            asm_format_row,
-            state="readonly",
-            values=[fmt["name"] for _fmt_id, fmt in self._export_formats],
-        )
+        self.asm_format_combo = ttk.Combobox(asm_format_row, state="readonly")
         self.asm_format_combo.pack(side=tk.LEFT, fill="x", expand=True, padx=(6, 0))
-        self._set_asm_format_combo_selection(self._export_format_id)
         self.asm_format_combo.bind("<<ComboboxSelected>>", self._on_export_format_selected)
+        self._refresh_asm_format_options()
 
         self.asm_text = tk.Text(
             asm_frame, height=6, font=("Courier", 10), wrap=tk.NONE, bg=PANEL_TEXT_BG
@@ -538,20 +541,20 @@ class SpriteEditor:
             command=self._on_loop_changed,
         ).pack(anchor="w", padx=5, pady=(0, 5))
 
-        preview_frame = ttk.LabelFrame(anim_panel, text="Preview")
-        preview_frame.pack(fill="x", padx=5, pady=5)
+        preview_frame = ttk.LabelFrame(anim_panel, text="Preview", padding=(6, 4))
+        preview_frame.pack(fill="x", padx=5, pady=(5, 8))
         preview_btn_row = ttk.Frame(preview_frame)
-        preview_btn_row.pack(fill="x", pady=2)
+        preview_btn_row.pack(fill="x", pady=(0, 4))
         self.anim_play_btn = ttk.Button(
             preview_btn_row, text="▶ Play", command=self.start_anim_preview
         )
-        self.anim_play_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(8, 2))
+        self.anim_play_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(0, 2))
         self.anim_stop_btn = ttk.Button(
             preview_btn_row, text="■ Stop", command=self.stop_anim_preview
         )
-        self.anim_stop_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(2, 8))
+        self.anim_stop_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(2, 0))
         self.anim_preview_status = ttk.Label(preview_frame, text="")
-        self.anim_preview_status.pack(anchor="w", padx=2, pady=2)
+        self.anim_preview_status.pack(fill="x", anchor="w", pady=(0, 2))
 
         self._bind_anim_frame_list_scroll(self._right_outer, anim_panel)
         self._refresh_animation_ui()
@@ -1251,9 +1254,10 @@ class SpriteEditor:
         total = len(frames)
         sf_elapsed = self.anim_preview_frame_counter + 1
         sf_total = frame["duration"]
+        sf_progress = f"sf {sf_elapsed:02d}/{sf_total:02d}"
         txt = (
             f"PREVIEW: {anim['name']} | Frame {self._anim_preview_index + 1}/{total} | "
-            f"sf {sf_elapsed}/{sf_total}"
+            f"{sf_progress}"
         )
         if os.environ.get("SPRITE_EDITOR_DEBUG") and self._preview_fps_window_start:
             self._preview_fps_ticks += 1
@@ -1265,7 +1269,12 @@ class SpriteEditor:
                 self._preview_fps_window_start = time.perf_counter()
         self.status.config(text=txt)
         if hasattr(self, "anim_preview_status"):
-            self.anim_preview_status.config(text=txt)
+            self.anim_preview_status.config(
+                text=(
+                    f"Frame {self._anim_preview_index + 1}/{total} · "
+                    f"{sf_progress}"
+                )
+            )
         self._update_edit_mode_indicator()
 
     def _set_preview_ui_state(self, enabled: bool):
@@ -1950,6 +1959,7 @@ class SpriteEditor:
         source, mask = self._sprite_list_source()
         self.rebuild_sprite_list(source=source, mask=mask)
         self.update_status()
+        self.update_asm_export()
 
     def select_sprite(self, event=None):
         self.select_sprite_index(self.current_sprite)
@@ -2006,6 +2016,7 @@ class SpriteEditor:
                 self._apply_app_theme(app_bg)
             else:
                 self._restore_static_theme()
+        self._refresh_asm_format_options()
 
     def update_status(self):
         sprites = self._active_sprites()
@@ -2193,19 +2204,44 @@ class SpriteEditor:
         messagebox.showinfo("Export Binary", f"Saved {len(data)} bytes to\n{path}")
         return True
 
+    def _asm_in_animation_mode(self):
+        return self.anim_edit_mode or self.anim_preview_running
+
+    def _visible_export_formats(self):
+        animation_mode = self._asm_in_animation_mode()
+        visible = []
+        for format_id, fmt in self._export_formats:
+            if format_animation_only(fmt) and not animation_mode:
+                continue
+            visible.append((format_id, fmt))
+        return visible
+
+    def _refresh_asm_format_options(self):
+        visible = self._visible_export_formats()
+        visible_ids = {format_id for format_id, _fmt in visible}
+        if self._export_format_id not in visible_ids:
+            self._export_format_id = "ti99_default"
+            self._export_format = load_format_by_id("ti99_default")
+        if not hasattr(self, "asm_format_combo"):
+            return
+        self.asm_format_combo["values"] = [fmt["name"] for _format_id, fmt in visible]
+        self._set_asm_format_combo_selection(self._export_format_id)
+
     def _set_asm_format_combo_selection(self, format_id):
         if not hasattr(self, "asm_format_combo"):
             return
-        for index, (candidate_id, fmt) in enumerate(self._export_formats):
+        for index, (candidate_id, _fmt) in enumerate(self._visible_export_formats()):
             if candidate_id == format_id:
                 self.asm_format_combo.current(index)
                 return
-        if self._export_formats:
+        visible = self._visible_export_formats()
+        if visible:
             self.asm_format_combo.current(0)
+            self._export_format_id, self._export_format = visible[0]
 
     def _on_export_format_selected(self, _event=None):
         selection = self.asm_format_combo.get()
-        for format_id, fmt in self._export_formats:
+        for format_id, fmt in self._visible_export_formats():
             if fmt["name"] == selection:
                 self._export_format_id = format_id
                 self._export_format = fmt
@@ -2214,6 +2250,27 @@ class SpriteEditor:
 
     def _active_export_format(self):
         return self._export_format
+
+    def _animation_export_labels(self, fmt):
+        if self.current_animation is None:
+            return None, None
+        animation = self.animations[self.current_animation]
+        frames = animation.get("frames", [])
+        if not frames:
+            return build_sprite_index_map(frames), None
+        label_settings = fmt.get("labels", {})
+        patterns = label_settings.get("patterns", {})
+        anim_label = sanitize_label(
+            patterns.get("animation", "{anim_name}").format(
+                anim_name=animation.get("name", "")
+            ),
+            case=label_settings.get("case", "upper"),
+            max_length=label_settings.get("max_length", 32),
+        )
+        return (
+            build_sprite_index_map(frames),
+            build_sprite_label_map(frames, fmt, anim_label),
+        )
 
     def _build_asm_for_sprite_data(self, sprite, slot_index):
         return render_sprite(
@@ -2250,11 +2307,13 @@ class SpriteEditor:
         fmt = self._active_export_format()
         comment = fmt["dialect"]["comment_prefix"]
         if self.anim_preview_running and self.current_animation is not None:
-            frames = self.animations[self.current_animation]["frames"]
+            animation = self.animations[self.current_animation]
+            frames = animation["frames"]
             frame = frames[self._anim_preview_index]
             header_lines = [
                 f"{comment} Preview frame {self._anim_preview_index + 1}/{len(frames)}"
             ]
+            sprite_indices, sprite_labels = self._animation_export_labels(fmt)
             return render_frame_block(
                 frame["sprites"],
                 frame["stack_mask"],
@@ -2262,7 +2321,14 @@ class SpriteEditor:
                 fmt=fmt,
                 header_lines=header_lines,
                 frame_index=self._anim_preview_index,
-                sprite_indices=build_sprite_index_map(frames),
+                duration=frame.get("duration", 4),
+                anim_label=sanitize_label(
+                    animation.get("name", ""),
+                    case=fmt.get("labels", {}).get("case", "upper"),
+                    max_length=fmt.get("labels", {}).get("max_length", 32),
+                ),
+                sprite_indices=sprite_indices,
+                sprite_labels=sprite_labels,
             )
 
         if self.anim_edit_mode and self._frame_edit_snapshot is not None:
@@ -2276,7 +2342,7 @@ class SpriteEditor:
                     f"(duration={snapshot['duration']} sf)"
                 )
             ]
-            frames = self.animations[self.current_animation]["frames"]
+            sprite_indices, sprite_labels = self._animation_export_labels(fmt)
             return render_frame_block(
                 snapshot["sprites"],
                 snapshot["stack_mask"],
@@ -2284,22 +2350,17 @@ class SpriteEditor:
                 fmt=fmt,
                 header_lines=header_lines,
                 frame_index=self.current_anim_frame,
-                sprite_indices=build_sprite_index_map(frames),
+                duration=snapshot.get("duration", 4),
+                anim_label=sanitize_label(
+                    anim_name,
+                    case=fmt.get("labels", {}).get("case", "upper"),
+                    max_length=fmt.get("labels", {}).get("max_length", 32),
+                ),
+                sprite_indices=sprite_indices,
+                sprite_labels=sprite_labels,
             )
 
-        asm = self.build_asm_text()
-        if (
-            not self.anim_edit_mode
-            and self.current_animation is not None
-            and self.animations[self.current_animation]["frames"]
-        ):
-            anim = self.animations[self.current_animation]
-            header = (
-                f"{comment} Animation '{anim['name']}' "
-                f"({len(anim['frames'])} frames)\n"
-            )
-            asm = header + asm
-        return asm
+        return self.build_asm_text()
 
     def update_asm_export(self):
         if not hasattr(self, "asm_text"):

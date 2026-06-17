@@ -162,11 +162,12 @@ Sprites export as `BYTE` directives with 8 hex values per line. An 8×8 sprite i
 4. Bottom-right (rows 8–15, columns 8–15)
 
 ```
-; TMS9918 Sprite 00 16x16 Color 2
-BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
-BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
-BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
-BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
+SPR0
+; Sprite 00 16x16 Color 2
+    BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
+    BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
+    BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
+    BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
 ```
 
 **Animation → Export Animation ASM** produces all frames with timing metadata. Only **stacked** sprite slots are exported per frame (matching the canvas composite).
@@ -174,34 +175,46 @@ BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
 Example — two-frame walk cycle (one stacked sprite per frame):
 
 ```asm
-; Animation 'walk' — 2 frames
-; Frame 0: duration=4 screen frames
-; TMS9918 Sprite 00 8x8 Color 2
-BYTE >80,>00,>00,>00,>00,>00,>00,>00
+; Animation: walk
+; Frames: 2
+WALK_F00:
+; Duration: 4 screen frames
+SPR0
+; Sprite 00 8x8 Color 2
+    BYTE >80,>00,>00,>00,>00,>00,>00,>00
 
 
-; Frame 1: duration=8 screen frames
-; TMS9918 Sprite 00 8x8 Color 2
-BYTE >80,>80,>00,>00,>00,>00,>00,>00
+WALK_F01:
+; Duration: 8 screen frames
+SPR1
+; Sprite 00 8x8 Color 2
+    BYTE >80,>80,>00,>00,>00,>00,>00,>00
 
 
-; Durations (screen frames): 4, 8
+WALK_DUR:
+; Frame durations (screen frames)
+    BYTE 4,8
 ; Total cycle: 12 screen frames (~200 ms)
 ```
 
 Example — single frame with two stacked sprites (body + detail layer):
 
 ```asm
-; Animation 'hero' — 1 frames
-; Frame 0: duration=6 screen frames
-; TMS9918 Sprite 00 8x8 Color 2
-BYTE >80,>00,>00,>00,>00,>00,>00,>00
+; Animation: hero
+; Frames: 1
+HERO_F00:
+; Duration: 6 screen frames
+SPR0
+; Sprite 00 8x8 Color 2
+    BYTE >80,>00,>00,>00,>00,>00,>00,>00
+SPR1
+; Sprite 01 8x8 Color 4
+    BYTE >80,>40,>00,>00,>00,>00,>00,>00
 
-; TMS9918 Sprite 01 8x8 Color 4
-BYTE >80,>40,>00,>00,>00,>00,>00,>00
 
-
-; Durations (screen frames): 6
+HERO_DUR:
+; Frame durations (screen frames)
+    BYTE 6
 ; Total cycle: 6 screen frames (~100 ms)
 ```
 
@@ -215,8 +228,8 @@ ASM output is driven by JSON templates in [`formats/`](formats/). Pick a format 
 
 | File | Description |
 |------|-------------|
-| `ti99_default.json` | Current TI-99/4A style (`BYTE >XX`, timing comments) |
-| `ti99_labeled.json` | TI-99 dialect with frame labels and a `BYTE` duration table |
+| `ti99_default.json` | TI-99/4A style with SPR labels, frame labels, and a `BYTE` duration table |
+| `ti99_frame_directory.json` | Animation header with frame count and per-frame address/duration entries |
 | `generic_db.json` | `db $XX` style for Z80/6502-like assemblers |
 
 Each format file defines:
@@ -244,24 +257,26 @@ Template placeholders include:
 | `{comment}` | Dialect comment prefix (`;`) |
 | `{data_directive}` / `{data_line}` | Assembler data directive and formatted byte line |
 
-Example labeled output (`ti99_labeled.json`):
+Example default output (`ti99_default.json`):
 
 ```asm
 ; Animation: walk
 ; Frames: 2
 WALK_F00:
 ; Duration: 4 screen frames
+SPR0
 ; Sprite 00 8x8 Color 2
-BYTE >80,>00,>00,>00,>00,>00,>00,>00
+    BYTE >80,>00,>00,>00,>00,>00,>00,>00
 
 WALK_F01:
 ; Duration: 8 screen frames
+SPR1
 ; Sprite 00 8x8 Color 2
-BYTE >80,>80,>00,>00,>00,>00,>00,>00
+    BYTE >80,>80,>00,>00,>00,>00,>00,>00
 
 WALK_DUR:
 ; Frame durations (screen frames)
-BYTE 4,8
+    BYTE 4,8
 
 ; Total cycle: 12 screen frames (~200 ms)
 ```

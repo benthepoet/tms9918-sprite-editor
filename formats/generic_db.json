@@ -10,7 +10,7 @@
     "hex_width": 2,
     "value_separator": ",",
     "bytes_per_line": 8,
-    "indent": "  "
+    "indent": "    "
   },
   "labels": {
     "case": "upper",

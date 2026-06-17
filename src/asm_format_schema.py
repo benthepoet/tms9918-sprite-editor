@@ -142,6 +142,10 @@ def load_format_by_id(format_id: str) -> dict:
     return load_format(path)
 
 
+def format_animation_only(fmt: dict) -> bool:
+    return bool(fmt.get("animation_only"))
+
+
 def default_format() -> tuple[str, dict]:
     formats = list_formats()
     for format_id, fmt in formats:

@@ -6,7 +6,7 @@ MAX_FILE_BYTES_WARN = 5_000_000
 
 
 def default_sprite_name(index: int) -> str:
-    return f"Sprite {index:02d}"
+    return f"SPR{index}"
 
 
 def sprite_display_name(sprite: dict, index: int) -> str:

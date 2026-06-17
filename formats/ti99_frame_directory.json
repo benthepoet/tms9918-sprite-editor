@@ -2,6 +2,7 @@
   "version": 1,
   "name": "TI-99/4A Frame Directory",
   "description": "Animation header with frame count and per-frame DATA address/duration entries before labeled sprite data",
+  "animation_only": true,
   "dialect": {
     "comment_prefix": ";",
     "data_directive": "BYTE",
@@ -20,7 +21,7 @@
     "patterns": {
       "animation": "{anim_name}",
       "frame": "{anim_label}_F{frame_index:02d}",
-      "sprite": "SPR{sprite_index}",
+      "sprite": "{sprite_name}",
       "duration_table": "{anim_label}_DUR",
       "frame_count": "{anim_label}_NFRAMES"
     }
