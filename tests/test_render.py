@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import tkinter as tk
 
-from sprite import CANVAS_BG, CANVAS_GRID_OUTLINE, CANVAS_OFF_PIXEL, SpriteEditor
+from sprite import CANVAS_BG, CANVAS_GRID_OUTLINE, SpriteEditor
 
 
 class RecordCanvas:
@@ -40,42 +40,14 @@ class RenderTests(unittest.TestCase):
         return list(values)
 
     def test_resolve_stack_indices_follows_list_order(self):
-        indices = self.editor._resolve_stack_indices(
-            [True, False, True], True, 0
-        )
+        indices = self.editor._resolve_stack_indices([True, False, True])
         self.assertEqual(indices, [0, 2])
-
-    def test_resolve_stack_indices_single_mode(self):
-        indices = self.editor._resolve_stack_indices([False, False], False, 1)
-        self.assertEqual(indices, [1])
 
     def test_get_active_sprite_state_injects_current_sprite(self):
         mask = self._mask([True, False])
-        self.editor.stack_enabled = tk.BooleanVar(value=True)
         self.editor.stack_vars = [tk.BooleanVar(value=value) for value in mask]
-        _, _, resolved_mask = self.editor._get_active_sprite_state()
+        _, resolved_mask = self.editor._get_active_sprite_state()
         self.assertTrue(resolved_mask[1])
-
-    def test_render_single_sprite_draws_off_pixels(self):
-        canvas = RecordCanvas()
-        sprites = self.editor.sprites
-        self.editor._render_composite(
-            canvas,
-            sprites,
-            False,
-            [True, False],
-            0,
-            pixel_size=10,
-            draw_off_pixels=True,
-            transparent_color="#aaaaaa",
-            outline="#666666",
-        )
-        self.assertEqual(len(canvas.rectangles), 128)
-        overlay = canvas.rectangles[64:]
-        off_pixels = [rect for rect in overlay if rect[4]["fill"] == CANVAS_OFF_PIXEL]
-        on_pixels = [rect for rect in overlay if rect[4]["fill"] != CANVAS_OFF_PIXEL]
-        self.assertEqual(len(off_pixels), 63)
-        self.assertEqual(len(on_pixels), 1)
 
     def test_render_stacked_includes_injected_current_sprite(self):
         canvas = RecordCanvas()
@@ -85,11 +57,8 @@ class RenderTests(unittest.TestCase):
         self.editor._render_composite(
             canvas,
             sprites,
-            True,
             stack_mask,
-            self.editor.current_sprite,
             pixel_size=10,
-            draw_off_pixels=False,
             transparent_color="#aaaaaa",
             outline="#666666",
         )
@@ -105,9 +74,7 @@ class RenderTests(unittest.TestCase):
         self.editor._render_composite(
             canvas,
             [empty_sprite],
-            True,
             [True],
-            0,
             pixel_size=10,
             transparent_color="#aaaaaa",
         )
@@ -118,17 +85,13 @@ class RenderTests(unittest.TestCase):
 
     def test_preview_render_uses_empty_outline(self):
         canvas = RecordCanvas()
-        self.editor.stack_enabled = tk.BooleanVar(value=False)
         self.editor.stack_vars = [tk.BooleanVar(value=True) for _ in self.editor.sprites]
-        sprites, stack_enabled, stack_mask = self.editor._get_active_sprite_state()
+        sprites, stack_mask = self.editor._get_active_sprite_state()
         self.editor._render_composite(
             canvas,
             sprites,
-            stack_enabled,
             stack_mask,
-            self.editor.current_sprite,
             pixel_size=20,
-            draw_off_pixels=False,
             transparent_color="#000000",
             outline="",
         )

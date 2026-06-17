@@ -65,7 +65,7 @@ class PreviewEngineTests(unittest.TestCase):
         self.editor.anim_preview_running = True
         self.editor._anim_preview_index = 1
         self.editor.animations[0]["frames"][1]["sprites"][0]["pattern"][0][0] = 1
-        sprites, _, _ = self.editor._get_active_sprite_state()
+        sprites, _ = self.editor._get_active_sprite_state()
         self.assertEqual(sprites[0]["pattern"][0][0], 1)
 
 

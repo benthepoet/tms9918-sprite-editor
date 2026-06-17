@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import tkinter as tk
 
 from animation_schema import deep_copy_frame
-from sprite import SpriteEditor
+from sprite import ANIM_EDIT_APP_BG, PANEL_TEXT_BG, SpriteEditor
 from test_animation import make_frame
 
 
@@ -22,7 +22,6 @@ class FrameEditTests(unittest.TestCase):
         ]
         self.editor.current_animation = 0
         self.editor.stack_vars = [tk.BooleanVar(value=True)]
-        self.editor.stack_enabled = tk.BooleanVar(value=True)
 
     def tearDown(self):
         self.root.destroy()
@@ -101,22 +100,6 @@ class FrameEditTests(unittest.TestCase):
         self.assertEqual(frame["sprites"][0]["pattern"][0][0], 1)
         self.assertEqual(frame["sprites"][1]["pattern"][1][1], 1)
         self.assertEqual(frame["stack_mask"], [True, True])
-
-    def test_capture_frame_with_stacking_off_copies_current_sprite_only(self):
-        self.editor.init_sprites(2)
-        self.editor.stack_vars = [
-            tk.BooleanVar(value=True),
-            tk.BooleanVar(value=True),
-        ]
-        self.editor.stack_enabled.set(False)
-        self.editor.current_sprite = 1
-        self.editor.sprites[0]["pattern"][0][0] = 1
-        self.editor.sprites[1]["pattern"][0][0] = 1
-        self.editor.add_anim_frame()
-        frame = self.editor.animations[0]["frames"][-1]
-        self.assertEqual(len(frame["sprites"]), 1)
-        self.assertEqual(frame["sprites"][0]["pattern"][0][0], 1)
-        self.assertEqual(frame["stack_mask"], [True])
 
     def test_capture_frame_does_not_recurse_with_ui(self):
         editor = SpriteEditor(self.root, create_ui=True)
@@ -202,16 +185,23 @@ class FrameEditTests(unittest.TestCase):
         editor.update_status()
         self.assertIn("STATIC EDIT", editor.mode_indicator.cget("text"))
         self.assertEqual(editor.sprites_panel.cget("text"), "Project Sprites")
+        static_bg = editor.root.cget("bg")
 
         editor.select_anim_frame(0)
         self.assertIn("FRAME EDIT", editor.mode_indicator.cget("text"))
         self.assertIn("walk", editor.mode_indicator.cget("text"))
         self.assertEqual(editor.sprites_panel.cget("text"), "Frame Sprites")
+        self.assertEqual(editor.root.cget("bg"), ANIM_EDIT_APP_BG)
+        self.assertEqual(editor.asm_text.cget("bg"), PANEL_TEXT_BG)
+        self.assertEqual(editor.anim_frame_list.cget("bg"), PANEL_TEXT_BG)
 
         editor.exit_animation_mode()
         self.root.update_idletasks()
         self.assertIn("STATIC EDIT", editor.mode_indicator.cget("text"))
         self.assertEqual(editor.sprites_panel.cget("text"), "Project Sprites")
+        self.assertEqual(editor.root.cget("bg"), static_bg)
+        self.assertEqual(editor.asm_text.cget("bg"), PANEL_TEXT_BG)
+        self.assertEqual(editor.anim_frame_list.cget("bg"), PANEL_TEXT_BG)
 
     def test_exit_animation_mode_without_selecting_sprite(self):
         editor = SpriteEditor(self.root, create_ui=True)

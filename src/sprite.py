@@ -54,6 +54,9 @@ VDP_FRAME_SEC = 1.0 / 59.94
 CANVAS_BG = "#777777"
 CANVAS_GRID_OUTLINE = "#555555"
 CANVAS_OFF_PIXEL = "#555555"
+ANIM_EDIT_APP_BG = "#fff7ed"
+ANIM_PREVIEW_APP_BG = "#eef4ff"
+PANEL_TEXT_BG = "#ffffff"
 
 if os.environ.get("SPRITE_EDITOR_DEBUG"):
     logging.basicConfig(level=logging.DEBUG)
@@ -72,7 +75,6 @@ class SpriteEditor:
         self.init_sprites(1)
 
         self.zoom = 20
-        self.stack_enabled = tk.BooleanVar(value=True)
         self.stack_vars = []
 
         self.animations = []
@@ -86,7 +88,6 @@ class SpriteEditor:
         self._anim_preview_next_tick = 0.0
         self._frame_edit_snapshot = None
         self._static_stack_mask = None
-        self._static_stack_enabled = None
         self._preview_return_to_frame_edit = False
         self._preview_fps_ticks = 0
         self._preview_fps_window_start = 0.0
@@ -183,15 +184,43 @@ class SpriteEditor:
         mode_menu.add_command(label="Switch to 8×8", command=lambda: self.set_mode(8))
         mode_menu.add_command(label="Switch to 16×16", command=lambda: self.set_mode(16))
         
-        main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self._ui_style = ttk.Style()
+        if "clam" in self._ui_style.theme_names():
+            self._ui_style.theme_use("clam")
+        try:
+            self._static_app_bg = self._ui_style.lookup("TFrame", "background") or "#f0f0f0"
+            self._default_label_bg = (
+                self._ui_style.lookup("TLabel", "background") or self._static_app_bg
+            )
+            self._default_button_bg = (
+                self._ui_style.lookup("TButton", "background") or self._static_app_bg
+            )
+            self._default_button_bordercolor = (
+                self._ui_style.lookup("TButton", "bordercolor") or "#9e9a91"
+            )
+            self._default_button_lightcolor = (
+                self._ui_style.lookup("TButton", "lightcolor") or "#eeebe7"
+            )
+            self._default_button_darkcolor = (
+                self._ui_style.lookup("TButton", "darkcolor") or "#cfcdc8"
+            )
+        except tk.TclError:
+            self._static_app_bg = "#f0f0f0"
+            self._default_label_bg = "#f0f0f0"
+            self._default_button_bg = "#f0f0f0"
+            self._default_button_bordercolor = "#9e9a91"
+            self._default_button_lightcolor = "#eeebe7"
+            self._default_button_darkcolor = "#cfcdc8"
 
-        left_outer = ttk.Frame(main_frame, width=300)
-        left_outer.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
-        left_outer.pack_propagate(False)
+        self._main_frame = tk.Frame(self.root, bg=self._static_app_bg)
+        self._main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self._left_outer = tk.Frame(self._main_frame, bg=self._static_app_bg, width=300)
+        self._left_outer.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        self._left_outer.pack_propagate(False)
 
         palette_frame = ttk.LabelFrame(
-            left_outer, text="TMS9918 Palette (T=Transparent)"
+            self._left_outer, text="TMS9918 Palette (T=Transparent)"
         )
         palette_frame.pack(fill=tk.X)
         for column in range(4):
@@ -243,12 +272,12 @@ class SpriteEditor:
         )
         self._current_color_swatch.pack(side=tk.RIGHT)
 
-        self.sprites_panel = ttk.LabelFrame(left_outer, text="Project Sprites")
+        self.sprites_panel = ttk.LabelFrame(self._left_outer, text="Project Sprites")
         self.sprites_panel.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
         
         # Center: Drawing Canvas (now supports stacking)
         self.canvas_frame = ttk.LabelFrame(
-            main_frame,
+            self._main_frame,
             text="Drawing Canvas - Stacked View (LMB=draw on current, RMB=erase on current)",
         )
         self.canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
@@ -273,15 +302,17 @@ class SpriteEditor:
         asm_frame = ttk.LabelFrame(self.canvas_frame, text="Assembly Export")
         asm_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
 
-        self.asm_text = tk.Text(asm_frame, height=6, font=("Courier", 10), wrap=tk.NONE)
+        self.asm_text = tk.Text(
+            asm_frame, height=6, font=("Courier", 10), wrap=tk.NONE, bg=PANEL_TEXT_BG
+        )
         self.asm_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.asm_text.bind("<Key>", lambda e: "break")
         
-        right_outer = ttk.Frame(main_frame, width=280)
-        right_outer.pack(side=tk.RIGHT, fill=tk.Y)
-        right_outer.pack_propagate(False)
+        self._right_outer = tk.Frame(self._main_frame, bg=self._static_app_bg, width=280)
+        self._right_outer.pack(side=tk.RIGHT, fill=tk.Y)
+        self._right_outer.pack_propagate(False)
 
-        right_frame = ttk.Frame(right_outer)
+        right_frame = ttk.Frame(self._right_outer)
         right_frame.pack(fill=tk.BOTH, expand=True)
         list_frame = ttk.Frame(self.sprites_panel)
         list_frame.pack(pady=5, fill="x", padx=5)
@@ -348,14 +379,6 @@ class SpriteEditor:
             self.sprites_panel, text="Rename", command=self.rename_sprite_dialog
         ).pack(pady=(0, 5), fill="x", padx=5)
 
-        self.stack_enabled_checkbox = ttk.Checkbutton(
-            self.sprites_panel,
-            text="Enable Stacking",
-            variable=self.stack_enabled,
-            command=self._on_stack_enabled_changed_static,
-        )
-        self.stack_enabled_checkbox.pack(anchor="w", padx=5, pady=(0, 5))
-
         ttk.Button(self.sprites_panel, text="Clear Sprite", command=self.clear_current).pack(
             pady=2, fill="x", padx=5
         )
@@ -366,7 +389,7 @@ class SpriteEditor:
             self.sprites_panel, text="Duplicate Sprite", command=self.copy_to_next
         ).pack(pady=2, fill="x", padx=5)
 
-        self._bind_sprite_slots_scroll(left_outer, self.sprites_panel, list_frame)
+        self._bind_sprite_slots_scroll(self._left_outer, self.sprites_panel, list_frame)
 
         anim_panel = ttk.LabelFrame(right_frame, text="Animations")
         anim_panel.pack(fill="x")
@@ -397,7 +420,9 @@ class SpriteEditor:
         frame_list_row.pack(fill="x", padx=5, pady=2)
         frame_list_row.columnconfigure(0, weight=1)
         frame_list_row.rowconfigure(0, weight=1)
-        self.anim_frame_list = tk.Listbox(frame_list_row, height=6, width=20)
+        self.anim_frame_list = tk.Listbox(
+            frame_list_row, height=6, width=20, bg=PANEL_TEXT_BG
+        )
         self.anim_frame_list.grid(row=0, column=0, sticky="nsew")
         self.anim_frame_list.bind("<<ListboxSelect>>", self._on_anim_frame_selected)
         self._anim_frame_scrollbar = tk.Scrollbar(
@@ -475,15 +500,114 @@ class SpriteEditor:
         self.anim_preview_status = ttk.Label(preview_frame, text="")
         self.anim_preview_status.pack(anchor="w", padx=2, pady=2)
 
-        self._bind_anim_frame_list_scroll(right_outer, anim_panel)
+        self._bind_anim_frame_list_scroll(self._right_outer, anim_panel)
         self._refresh_animation_ui()
-        
+
         self.status = ttk.Label(self.root, text="", relief=tk.SUNKEN, anchor=tk.W)
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self._restore_static_theme()
         
         self.update_canvas()
         self.update_status()
         self.update_asm_export()
+
+    def _button_border_colors(self, background):
+        if background == ANIM_EDIT_APP_BG:
+            return "#c4b5a5", "#fff8f0", "#dfc8b5"
+        if background == ANIM_PREVIEW_APP_BG:
+            return "#a8b4c8", "#f4f8ff", "#c5d4e8"
+        return (
+            self._default_button_bordercolor,
+            self._default_button_lightcolor,
+            self._default_button_darkcolor,
+        )
+
+    def _configure_theme_style(
+        self, style_name, background, *, button=False, foreground=None
+    ):
+        style = self._ui_style
+        options = {"background": background}
+        if foreground is not None:
+            options["foreground"] = foreground
+        bordercolor = lightcolor = darkcolor = None
+        if button:
+            bordercolor, lightcolor, darkcolor = self._button_border_colors(background)
+            options.update(
+                {
+                    "bordercolor": bordercolor,
+                    "lightcolor": lightcolor,
+                    "darkcolor": darkcolor,
+                }
+            )
+        try:
+            style.configure(style_name, **options)
+        except tk.TclError:
+            return
+        if button:
+            map_options = {
+                "background": [
+                    ("active", background),
+                    ("pressed", background),
+                    ("!disabled", background),
+                ],
+                "bordercolor": [("!disabled", bordercolor)],
+                "lightcolor": [("!disabled", lightcolor)],
+                "darkcolor": [("!disabled", darkcolor)],
+            }
+            if foreground is not None:
+                map_options["foreground"] = [("!disabled", foreground)]
+            style.map(style_name, **map_options)
+
+    def _apply_app_theme(self, background):
+        self.root.configure(bg=background)
+        for frame in (self._main_frame, self._left_outer, self._right_outer):
+            frame.configure(bg=background)
+
+        text_fg = "#1f2937"
+        for name in ("TFrame", "TLabelframe"):
+            self._configure_theme_style(name, background)
+        for name in ("TLabel", "TLabelframe.Label", "TCheckbutton"):
+            self._configure_theme_style(name, background, foreground=text_fg)
+        for name in ("TSpinbox", "TCombobox"):
+            self._configure_theme_style(name, background, foreground=text_fg)
+            try:
+                self._ui_style.configure(name, fieldbackground=background)
+            except tk.TclError:
+                pass
+        self._configure_theme_style(
+            "TButton", background, button=True, foreground=text_fg
+        )
+
+        self.root.update_idletasks()
+
+    def _restore_static_theme(self):
+        self.root.configure(bg=self._static_app_bg)
+        for frame in (self._main_frame, self._left_outer, self._right_outer):
+            frame.configure(bg=self._static_app_bg)
+
+        style = self._ui_style
+        style.configure("TFrame", background=self._static_app_bg)
+        style.configure("TLabelframe", background=self._static_app_bg)
+        for widget_style in ("TLabel", "TLabelframe.Label", "TCheckbutton"):
+            try:
+                style.configure(widget_style, background=self._default_label_bg)
+            except tk.TclError:
+                pass
+        for widget_style in ("TSpinbox", "TCombobox"):
+            try:
+                style.configure(
+                    widget_style,
+                    background=self._default_label_bg,
+                    fieldbackground=self._default_label_bg,
+                )
+            except tk.TclError:
+                pass
+        self._configure_theme_style(
+            "TButton", self._default_button_bg, button=True
+        )
+
+        self.root.update_idletasks()
 
     def _sprite_slot_row_height(self):
         return 26
@@ -925,11 +1049,8 @@ class SpriteEditor:
             self._render_composite(
                 self.canvas,
                 frame["sprites"],
-                frame["stack_enabled"],
                 frame["stack_mask"],
-                self.current_sprite,
                 pixel_size=ps,
-                draw_off_pixels=False,
                 transparent_color="#aaaaaa",
                 outline=CANVAS_GRID_OUTLINE,
             )
@@ -1109,33 +1230,8 @@ class SpriteEditor:
         self._anim_preview_index = 0
         self._frame_edit_snapshot = None
         self._static_stack_mask = None
-        self._static_stack_enabled = None
         self._preview_return_to_frame_edit = False
-        if hasattr(self, "stack_enabled_checkbox"):
-            self._bind_stack_enabled_handler("static")
         self._refresh_animation_ui()
-
-    def _bind_stack_enabled_handler(self, source):
-        if not hasattr(self, "stack_enabled_checkbox"):
-            return
-        if source == "frame":
-            self.stack_enabled_checkbox.config(
-                command=self._on_stack_enabled_changed_frame
-            )
-        else:
-            self.stack_enabled_checkbox.config(
-                command=self._on_stack_enabled_changed_static
-            )
-
-    def _on_stack_enabled_changed_static(self):
-        self.refresh_views()
-
-    def _on_stack_enabled_changed_frame(self):
-        if self.anim_preview_running:
-            return
-        if self._frame_edit_snapshot is not None:
-            self._frame_edit_snapshot["stack_enabled"] = self.stack_enabled.get()
-        self.refresh_views()
 
     def _on_stack_checkbox_changed(self):
         if self.anim_preview_running:
@@ -1150,28 +1246,21 @@ class SpriteEditor:
             mask[self.current_sprite] = True
         return mask
 
-    def _capture_sprites_for_frame(self, sprites, stack_enabled, stack_mask):
+    def _capture_sprites_for_frame(self, sprites, stack_mask):
         captured = []
-        if stack_enabled:
-            for index, sprite in enumerate(sprites):
-                if index < len(stack_mask) and stack_mask[index]:
-                    captured.append(deep_copy_sprite(sprite))
-        elif self.current_sprite < len(sprites):
-            captured.append(deep_copy_sprite(sprites[self.current_sprite]))
+        for index, sprite in enumerate(sprites):
+            if index < len(stack_mask) and stack_mask[index]:
+                captured.append(deep_copy_sprite(sprite))
         return captured
 
     def _capture_current_state_as_frame(self, duration=4):
         if self.anim_edit_mode and self._frame_edit_snapshot is not None:
-            stack_enabled = self._frame_edit_snapshot["stack_enabled"]
             stack_mask = self._frame_edit_snapshot["stack_mask"][:]
             sprites = self._frame_edit_snapshot["sprites"]
         else:
-            stack_enabled = self.stack_enabled.get()
             stack_mask = self._capture_stack_mask()
             sprites = self.sprites
-        captured_sprites = self._capture_sprites_for_frame(
-            sprites, stack_enabled, stack_mask
-        )
+        captured_sprites = self._capture_sprites_for_frame(sprites, stack_mask)
         if not captured_sprites:
             captured_sprites = [
                 create_empty_sprite_dict(
@@ -1180,7 +1269,7 @@ class SpriteEditor:
             ]
         return {
             "duration": duration,
-            "stack_enabled": stack_enabled,
+            "stack_enabled": True,
             "stack_mask": [True] * len(captured_sprites),
             "sprites": captured_sprites,
         }
@@ -1378,7 +1467,6 @@ class SpriteEditor:
             self.sprite_size_mode,
             self.current_color,
         )
-        self.stack_enabled.set(self._frame_edit_snapshot["stack_enabled"])
         self.rebuild_sprite_list(
             source="frame", mask=self._frame_edit_snapshot["stack_mask"]
         )
@@ -1423,7 +1511,6 @@ class SpriteEditor:
             return
         if self._static_stack_mask is None:
             self._static_stack_mask = [v.get() for v in self.stack_vars]
-            self._static_stack_enabled = self.stack_enabled.get()
         frame = anim["frames"][index]
         self._frame_edit_snapshot = compact_frame_slots(
             deep_copy_frame(frame),
@@ -1432,8 +1519,6 @@ class SpriteEditor:
         )
         self.current_anim_frame = index
         self.anim_edit_mode = True
-        self.stack_enabled.set(self._frame_edit_snapshot["stack_enabled"])
-        self._bind_stack_enabled_handler("frame")
         self.rebuild_sprite_list(
             source="frame", mask=self._frame_edit_snapshot["stack_mask"]
         )
@@ -1443,12 +1528,8 @@ class SpriteEditor:
     def _leave_anim_frame_edit(self):
         self._frame_edit_snapshot = None
         self.anim_edit_mode = False
-        if self._static_stack_enabled is not None:
-            self.stack_enabled.set(self._static_stack_enabled)
-        self._bind_stack_enabled_handler("static")
         self.rebuild_sprite_list(source="static")
         self._static_stack_mask = None
-        self._static_stack_enabled = None
         self._refresh_animation_ui(select_frame=False)
         self._clear_anim_frame_list_selection()
         self.refresh_views()
@@ -1601,9 +1682,7 @@ class SpriteEditor:
             stacked.append(self.current_sprite)
         return sorted(stacked)
 
-    def _resolve_stack_indices(self, stack_mask, stack_enabled, current_sprite):
-        if not stack_enabled:
-            return [current_sprite]
+    def _resolve_stack_indices(self, stack_mask):
         return [i for i, enabled in enumerate(stack_mask) if enabled]
 
     def _get_active_sprite_state(self):
@@ -1611,14 +1690,14 @@ class SpriteEditor:
             frame = self.animations[self.current_animation]["frames"][
                 self._anim_preview_index
             ]
-            return frame["sprites"], frame["stack_enabled"], frame["stack_mask"]
+            return frame["sprites"], frame["stack_mask"]
         if self.anim_edit_mode and self._frame_edit_snapshot is not None:
             snapshot = self._frame_edit_snapshot
-            return snapshot["sprites"], snapshot["stack_enabled"], snapshot["stack_mask"]
+            return snapshot["sprites"], snapshot["stack_mask"]
         mask = [var.get() for var in self.stack_vars]
         if self.current_sprite < len(mask):
             mask[self.current_sprite] = True
-        return self.sprites, self.stack_enabled.get(), mask
+        return self.sprites, mask
 
     def _draw_sprite_grid(self, target_canvas, size, pixel_size, fill, outline):
         for y in range(size):
@@ -1637,44 +1716,18 @@ class SpriteEditor:
         self,
         target_canvas,
         sprites,
-        stack_enabled,
         stack_mask,
-        current_sprite,
         *,
         pixel_size=None,
-        draw_off_pixels=False,
         transparent_color="#000000",
         outline=CANVAS_GRID_OUTLINE,
         grid_empty_fill=CANVAS_BG,
     ):
         size = self.sprite_size_mode
         ps = pixel_size or (160 // size)
-        indices = self._resolve_stack_indices(
-            stack_mask, stack_enabled, current_sprite
-        )
+        indices = self._resolve_stack_indices(stack_mask)
 
         self._draw_sprite_grid(target_canvas, size, ps, grid_empty_fill, outline)
-
-        if not stack_enabled:
-            sprite_data = sprites[current_sprite]
-            pattern = sprite_data["pattern"]
-            color = sprite_data["color"]
-            fg_hex = (
-                self.rgb_to_hex(TI_COLORS[color])
-                if color != 0
-                else transparent_color
-            )
-            for y in range(size):
-                for x in range(size):
-                    is_on = pattern[y][x] == 1
-                    if not is_on and not draw_off_pixels:
-                        continue
-                    fill = fg_hex if is_on else CANVAS_OFF_PIXEL
-                    px, py = x * ps, y * ps
-                    target_canvas.create_rectangle(
-                        px, py, px + ps, py + ps, fill=fill, outline=outline
-                    )
-            return
 
         for idx in indices:
             sprite_data = sprites[idx]
@@ -1698,15 +1751,12 @@ class SpriteEditor:
         size = self.sprite_size_mode
         pixel_size = self.zoom
         self.canvas.config(width=size * pixel_size, height=size * pixel_size)
-        sprites, stack_enabled, stack_mask = self._get_active_sprite_state()
+        sprites, stack_mask = self._get_active_sprite_state()
         self._render_composite(
             self.canvas,
             sprites,
-            stack_enabled,
             stack_mask,
-            self.current_sprite,
             pixel_size=pixel_size,
-            draw_off_pixels=not stack_enabled,
             transparent_color="#aaaaaa",
             outline=CANVAS_GRID_OUTLINE,
         )
@@ -1830,6 +1880,7 @@ class SpriteEditor:
             )
             bg, fg = "#1d4ed8", "#ffffff"
             canvas_title = "Drawing Canvas — animation preview"
+            app_bg = ANIM_PREVIEW_APP_BG
         elif self.anim_edit_mode:
             anim_name = "?"
             if self.current_animation is not None:
@@ -1844,6 +1895,7 @@ class SpriteEditor:
             )
             bg, fg = "#b45309", "#ffffff"
             canvas_title = "Drawing Canvas — editing animation frame"
+            app_bg = ANIM_EDIT_APP_BG
         else:
             text = "  STATIC EDIT — editing project sprite slots"
             if self.current_animation is not None:
@@ -1853,6 +1905,7 @@ class SpriteEditor:
             canvas_title = (
                 "Drawing Canvas - Stacked View (LMB=draw on current, RMB=erase on current)"
             )
+            app_bg = self._static_app_bg
 
         self.mode_indicator.config(text=text, bg=bg, fg=fg)
         self.canvas_frame.config(text=canvas_title)
@@ -1861,6 +1914,11 @@ class SpriteEditor:
                 self.sprites_panel.config(text="Frame Sprites")
             else:
                 self.sprites_panel.config(text="Project Sprites")
+        if hasattr(self, "_ui_style"):
+            if self.anim_edit_mode or self.anim_preview_running:
+                self._apply_app_theme(app_bg)
+            else:
+                self._restore_static_theme()
 
     def update_status(self):
         sprites = self._active_sprites()
@@ -1870,7 +1928,7 @@ class SpriteEditor:
             f"{self._current_sprite_display_name()} | "
             f"{self.sprite_size_mode}×{self.sprite_size_mode} | "
             f"Color: {col} {COLOR_NAMES[col]} | "
-            f"Stacking: {'ON' if self.stack_enabled.get() else 'OFF'}"
+            f"Stacked: {sum(var.get() for var in self.stack_vars)}"
         )
         if self.anim_edit_mode:
             anim_name = ""
@@ -2041,13 +2099,11 @@ class SpriteEditor:
     def build_asm_text(self, sprite_index=None):
         if sprite_index is None:
             sprite_index = self.current_sprite
-        sprites, _, _ = self._get_active_sprite_state()
+        sprites, _ = self._get_active_sprite_state()
         return self._build_asm_for_sprite_data(sprites[sprite_index], sprite_index)
 
-    def build_frame_asm(self, sprites, stack_enabled, stack_mask, header=""):
-        indices = self._resolve_stack_indices(
-            stack_mask, stack_enabled, self.current_sprite
-        )
+    def build_frame_asm(self, sprites, stack_mask, header=""):
+        indices = self._resolve_stack_indices(stack_mask)
         parts = []
         if header:
             parts.append(header.rstrip("\n"))
@@ -2063,9 +2119,7 @@ class SpriteEditor:
         for index, frame in enumerate(frames):
             durations.append(frame["duration"])
             lines.append(f"; Frame {index}: duration={frame['duration']} screen frames")
-            frame_asm = self.build_frame_asm(
-                frame["sprites"], frame["stack_enabled"], frame["stack_mask"]
-            )
+            frame_asm = self.build_frame_asm(frame["sprites"], frame["stack_mask"])
             if frame_asm:
                 lines.append(frame_asm)
             lines.append("")
@@ -2082,10 +2136,7 @@ class SpriteEditor:
             frame = frames[self._anim_preview_index]
             header = f"; Preview frame {self._anim_preview_index + 1}/{len(frames)}\n"
             return self.build_frame_asm(
-                frame["sprites"],
-                frame["stack_enabled"],
-                frame["stack_mask"],
-                header=header,
+                frame["sprites"], frame["stack_mask"], header=header
             )
 
         if self.anim_edit_mode and self._frame_edit_snapshot is not None:
@@ -2098,10 +2149,7 @@ class SpriteEditor:
                 f"(duration={snapshot['duration']} sf)\n"
             )
             return self.build_frame_asm(
-                snapshot["sprites"],
-                snapshot["stack_enabled"],
-                snapshot["stack_mask"],
-                header=header,
+                snapshot["sprites"], snapshot["stack_mask"], header=header
             )
 
         asm = self.build_asm_text()

@@ -54,8 +54,6 @@ def deep_copy_frame(frame: dict) -> dict:
 def frames_equal(left: dict, right: dict) -> bool:
     if left.get("duration") != right.get("duration"):
         return False
-    if left.get("stack_enabled") != right.get("stack_enabled"):
-        return False
     if left.get("stack_mask") != right.get("stack_mask"):
         return False
     left_sprites = left.get("sprites", [])
@@ -90,14 +88,6 @@ def compact_frame_slots(
     sprites = frame.get("sprites", [])
     mask = list(frame.get("stack_mask", []))
 
-    if not frame.get("stack_enabled", True):
-        if sprites:
-            frame["sprites"] = [deep_copy_sprite(sprites[0])]
-        else:
-            frame["sprites"] = [create_empty_sprite_dict(size, default_color)]
-        frame["stack_mask"] = [True]
-        return frame
-
     kept = []
     for index, sprite in enumerate(sprites):
         stacked = index < len(mask) and mask[index]
@@ -107,6 +97,7 @@ def compact_frame_slots(
         kept = [create_empty_sprite_dict(size, default_color)]
     frame["sprites"] = kept
     frame["stack_mask"] = [True] * len(kept)
+    frame["stack_enabled"] = True
     return frame
 
 
@@ -171,7 +162,7 @@ def validate_and_sanitize_animations(
         for index, raw_frame in enumerate(frames):
             frame = {
                 "duration": raw_frame.get("duration", 4),
-                "stack_enabled": raw_frame.get("stack_enabled", True),
+                "stack_enabled": True,
                 "stack_mask": list(raw_frame.get("stack_mask", [])),
                 "sprites": deep_copy_sprites(raw_frame.get("sprites", [])),
             }
