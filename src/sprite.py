@@ -5,6 +5,7 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+from binary_export import encode_animation_binary, encode_panel_binary, pattern_to_bytes
 from animation_schema import (
     MAX_FILE_BYTES_WARN,
     MAX_FRAMES_PER_ANIM,
@@ -167,6 +168,10 @@ class SpriteEditor:
             command=self.copy_asm,
             accelerator="Ctrl+Shift+C",
         )
+        file_menu.add_command(
+            label="Export Binary…",
+            command=self.export_panel_binary,
+        )
 
         anim_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Animation", menu=anim_menu)
@@ -182,6 +187,10 @@ class SpriteEditor:
         anim_menu.add_command(
             label="Export Animation ASM",
             command=self.copy_animation_asm,
+        )
+        anim_menu.add_command(
+            label="Export Animation Binary…",
+            command=self.export_animation_binary,
         )
         anim_menu.add_command(label="Exit Animation Mode", command=self.exit_animation_mode)
 
@@ -313,6 +322,15 @@ class SpriteEditor:
         )
         self.asm_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.asm_text.bind("<Key>", lambda e: "break")
+
+        asm_btn_row = ttk.Frame(asm_frame)
+        asm_btn_row.pack(fill="x", padx=5, pady=(0, 5))
+        ttk.Button(
+            asm_btn_row, text="Copy Assembly", command=self.copy_asm
+        ).pack(side=tk.LEFT, expand=True, fill="x", padx=(0, 3))
+        ttk.Button(
+            asm_btn_row, text="Save Binary…", command=self.export_panel_binary
+        ).pack(side=tk.LEFT, expand=True, fill="x", padx=(3, 0))
         
         self._right_outer = tk.Frame(self._main_frame, bg=self._static_app_bg, width=280)
         self._right_outer.pack(side=tk.RIGHT, fill=tk.Y)
@@ -2111,26 +2129,48 @@ class SpriteEditor:
                 messagebox.showwarning("Load Validation", "\n".join(warnings))
             messagebox.showinfo("Loaded", "Project loaded.")
     
-    def _pattern_row_byte(self, pattern, y, x0):
-        b = 0
-        for x in range(8):
-            if pattern[y][x0 + x]:
-                b |= (1 << (7 - x))
-        return b
-
     def _pattern_to_bytes(self, pattern, size):
-        if size == 8:
-            return [self._pattern_row_byte(pattern, y, 0) for y in range(8)]
-        bytes_list = []
-        for y in range(8):
-            bytes_list.append(self._pattern_row_byte(pattern, y, 0))
-        for y in range(8, 16):
-            bytes_list.append(self._pattern_row_byte(pattern, y, 0))
-        for y in range(8):
-            bytes_list.append(self._pattern_row_byte(pattern, y, 8))
-        for y in range(8, 16):
-            bytes_list.append(self._pattern_row_byte(pattern, y, 8))
-        return bytes_list
+        return list(pattern_to_bytes(pattern, size))
+
+    def _get_panel_export_slots(self):
+        if self.anim_preview_running and self.current_animation is not None:
+            frame = self.animations[self.current_animation]["frames"][
+                self._anim_preview_index
+            ]
+            sprites = frame["sprites"]
+            indices = self._resolve_stack_indices(frame["stack_mask"])
+            return [(index, sprites[index]) for index in indices]
+        if self.anim_edit_mode and self._frame_edit_snapshot is not None:
+            snapshot = self._frame_edit_snapshot
+            indices = self._resolve_stack_indices(snapshot["stack_mask"])
+            return [(index, snapshot["sprites"][index]) for index in indices]
+        sprites, _ = self._get_active_sprite_state()
+        return [(self.current_sprite, sprites[self.current_sprite])]
+
+    def _default_panel_binary_name(self):
+        if self.anim_preview_running and self.current_animation is not None:
+            anim = self.animations[self.current_animation]["name"]
+            return f"{anim}_preview{self._anim_preview_index + 1}.bin"
+        if self.anim_edit_mode and self._frame_edit_snapshot is not None:
+            anim_name = "frame"
+            if self.current_animation is not None:
+                anim_name = self.animations[self.current_animation]["name"]
+            return f"{anim_name}_frame{self.current_anim_frame}.bin"
+        return f"{self._current_sprite_display_name().replace(' ', '_')}.bin"
+
+    def _write_binary_file(self, data, *, title, initial_name):
+        path = filedialog.asksaveasfilename(
+            title=title,
+            initialfile=initial_name,
+            defaultextension=".bin",
+            filetypes=[("TMS9918 Binary", "*.bin"), ("All files", "*.*")],
+        )
+        if not path:
+            return False
+        with open(path, "wb") as handle:
+            handle.write(data)
+        messagebox.showinfo("Export Binary", f"Saved {len(data)} bytes to\n{path}")
+        return True
 
     def _build_asm_for_sprite_data(self, sprite, slot_index):
         pattern = sprite["pattern"]
@@ -2223,6 +2263,19 @@ class SpriteEditor:
         self.root.clipboard_clear()
         self.root.clipboard_append(asm)
 
+    def export_panel_binary(self):
+        slots = self._get_panel_export_slots()
+        try:
+            data = encode_panel_binary(self.sprite_size_mode, slots)
+        except ValueError as error:
+            messagebox.showerror("Export Binary", str(error))
+            return
+        self._write_binary_file(
+            data,
+            title="Export Binary",
+            initial_name=self._default_panel_binary_name(),
+        )
+
     def copy_animation_asm(self):
         if self.current_animation is None:
             messagebox.showinfo(
@@ -2238,6 +2291,30 @@ class SpriteEditor:
         self.root.clipboard_clear()
         self.root.clipboard_append(asm)
         messagebox.showinfo("Export Animation ASM", "Animation assembly copied to clipboard.")
+
+    def export_animation_binary(self):
+        if self.current_animation is None:
+            messagebox.showinfo(
+                "Export Animation Binary",
+                "Select an animation with at least one frame.",
+            )
+            return
+        anim = self.animations[self.current_animation]
+        if not anim.get("frames"):
+            messagebox.showinfo(
+                "Export Animation Binary", "This animation has no frames to export."
+            )
+            return
+        try:
+            data = encode_animation_binary(self.sprite_size_mode, anim)
+        except ValueError as error:
+            messagebox.showerror("Export Animation Binary", str(error))
+            return
+        self._write_binary_file(
+            data,
+            title="Export Animation Binary",
+            initial_name=f"{anim['name']}.bin",
+        )
 
     def _copy_asm_shortcut(self, event=None):
         self.copy_asm()
