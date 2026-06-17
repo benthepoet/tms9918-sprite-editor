@@ -97,10 +97,10 @@ class FrameEditTests(unittest.TestCase):
         self.editor.sprites[2]["pattern"][2][2] = 1
         self.editor.add_anim_frame()
         frame = self.editor.animations[0]["frames"][-1]
+        self.assertEqual(len(frame["sprites"]), 2)
         self.assertEqual(frame["sprites"][0]["pattern"][0][0], 1)
         self.assertEqual(frame["sprites"][1]["pattern"][1][1], 1)
-        self.assertEqual(frame["sprites"][2]["pattern"][2][2], 0)
-        self.assertFalse(frame["stack_mask"][2])
+        self.assertEqual(frame["stack_mask"], [True, True])
 
     def test_capture_frame_with_stacking_off_copies_current_sprite_only(self):
         self.editor.init_sprites(2)
@@ -114,8 +114,9 @@ class FrameEditTests(unittest.TestCase):
         self.editor.sprites[1]["pattern"][0][0] = 1
         self.editor.add_anim_frame()
         frame = self.editor.animations[0]["frames"][-1]
-        self.assertEqual(frame["sprites"][0]["pattern"][0][0], 0)
-        self.assertEqual(frame["sprites"][1]["pattern"][0][0], 1)
+        self.assertEqual(len(frame["sprites"]), 1)
+        self.assertEqual(frame["sprites"][0]["pattern"][0][0], 1)
+        self.assertEqual(frame["stack_mask"], [True])
 
     def test_capture_frame_does_not_recurse_with_ui(self):
         editor = SpriteEditor(self.root, create_ui=True)
@@ -184,12 +185,10 @@ class FrameEditTests(unittest.TestCase):
         editor.select_anim_frame(0)
         self.assertIn("FRAME EDIT", editor.mode_indicator.cget("text"))
         self.assertIn("walk", editor.mode_indicator.cget("text"))
-        self.assertIn("Frame Sprites", editor.sprite_slots_label.cget("text"))
 
         editor.exit_animation_mode()
         self.root.update_idletasks()
         self.assertIn("STATIC EDIT", editor.mode_indicator.cget("text"))
-        self.assertIn("Sprite Slots", editor.sprite_slots_label.cget("text"))
 
     def test_exit_animation_mode_without_selecting_sprite(self):
         editor = SpriteEditor(self.root, create_ui=True)
@@ -202,7 +201,6 @@ class FrameEditTests(unittest.TestCase):
         editor.current_animation = 0
         editor._refresh_animation_ui()
         editor.select_anim_frame(0)
-        editor.sprite_list.selection_clear(0, tk.END)
         editor.exit_animation_mode()
         self.root.update_idletasks()
         self.root.update()

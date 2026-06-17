@@ -5,11 +5,29 @@ MAX_FRAMES_PER_ANIM = 64
 MAX_FILE_BYTES_WARN = 5_000_000
 
 
+def default_sprite_name(index: int) -> str:
+    return f"Sprite {index:02d}"
+
+
+def sprite_display_name(sprite: dict, index: int) -> str:
+    name = str(sprite.get("name", "")).strip()
+    return name if name else default_sprite_name(index)
+
+
+def ensure_sprite_names(sprites: list) -> None:
+    for index, sprite in enumerate(sprites):
+        if not str(sprite.get("name", "")).strip():
+            sprite["name"] = default_sprite_name(index)
+
+
 def deep_copy_sprite(sprite: dict) -> dict:
-    return {
+    copied = {
         "pattern": [row[:] for row in sprite["pattern"]],
         "color": sprite["color"],
     }
+    if "name" in sprite:
+        copied["name"] = sprite["name"]
+    return copied
 
 
 def deep_copy_sprites(sprites: list) -> list:
@@ -54,11 +72,42 @@ def frames_equal(left: dict, right: dict) -> bool:
     return True
 
 
-def create_empty_sprite_dict(size: int, color: int = 2) -> dict:
-    return {
+def create_empty_sprite_dict(size: int, color: int = 2, name: str = "") -> dict:
+    sprite = {
         "pattern": [[0 for _ in range(size)] for _ in range(size)],
         "color": color,
     }
+    if name:
+        sprite["name"] = name
+    return sprite
+
+
+def compact_frame_slots(
+    frame: dict, size: int, default_color: int = 2
+) -> dict:
+    """Keep only stacked sprites in a frame; frames are independent of static slot count."""
+    frame = deep_copy_frame(frame)
+    sprites = frame.get("sprites", [])
+    mask = list(frame.get("stack_mask", []))
+
+    if not frame.get("stack_enabled", True):
+        if sprites:
+            frame["sprites"] = [deep_copy_sprite(sprites[0])]
+        else:
+            frame["sprites"] = [create_empty_sprite_dict(size, default_color)]
+        frame["stack_mask"] = [True]
+        return frame
+
+    kept = []
+    for index, sprite in enumerate(sprites):
+        stacked = index < len(mask) and mask[index]
+        if stacked:
+            kept.append(deep_copy_sprite(sprite))
+    if not kept:
+        kept = [create_empty_sprite_dict(size, default_color)]
+    frame["sprites"] = kept
+    frame["stack_mask"] = [True] * len(kept)
+    return frame
 
 
 def normalize_frame_slots(
@@ -98,7 +147,7 @@ def validate_frame(frame: dict, size: int) -> bool:
 def validate_and_sanitize_animations(
     anims: list,
     size: int,
-    target_slot_count: int,
+    default_color: int = 2,
     max_animations: int = MAX_ANIMATIONS,
     max_frames_per_anim: int = MAX_FRAMES_PER_ANIM,
 ) -> tuple[list, list[str]]:
@@ -126,7 +175,7 @@ def validate_and_sanitize_animations(
                 "stack_mask": list(raw_frame.get("stack_mask", [])),
                 "sprites": deep_copy_sprites(raw_frame.get("sprites", [])),
             }
-            normalize_frame_slots(frame, target_slot_count, size)
+            compact_frame_slots(frame, size, default_color)
             if validate_frame(frame, size):
                 valid_frames.append(frame)
             else:

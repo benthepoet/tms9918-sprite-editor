@@ -8,10 +8,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import tkinter as tk
 
 from animation_schema import (
+    compact_frame_slots,
     deep_copy_frame,
     deep_copy_sprite,
+    default_sprite_name,
+    ensure_sprite_names,
     frames_equal,
     normalize_frame_slots,
+    sprite_display_name,
     validate_and_sanitize_animations,
     validate_frame,
 )
@@ -71,15 +75,36 @@ class AnimationSchemaTests(unittest.TestCase):
         right["sprites"][0]["pattern"][0][0] = 0
         self.assertFalse(frames_equal(left, right))
 
+    def test_deep_copy_sprite_preserves_name(self):
+        sprite = {"pattern": [[0]], "color": 2, "name": "Hero"}
+        copy = deep_copy_sprite(sprite)
+        self.assertEqual(copy["name"], "Hero")
+
+    def test_ensure_sprite_names_fills_missing_names(self):
+        sprites = [{"pattern": [[0]], "color": 2}]
+        ensure_sprite_names(sprites)
+        self.assertEqual(sprites[0]["name"], default_sprite_name(0))
+
+    def test_sprite_display_name_uses_default_when_blank(self):
+        sprite = {"pattern": [[0]], "color": 2, "name": "  "}
+        self.assertEqual(sprite_display_name(sprite, 3), default_sprite_name(3))
+
+    def test_compact_frame_slots_keeps_only_stacked_sprites(self):
+        frame = make_frame(slots=3)
+        frame["stack_mask"] = [True, True, False]
+        compacted = compact_frame_slots(frame, 8)
+        self.assertEqual(len(compacted["sprites"]), 2)
+        self.assertEqual(compacted["stack_mask"], [True, True])
+
     def test_validate_and_sanitize_drops_invalid_frame(self):
         anims = [{"name": "test", "loop": True, "frames": [make_frame(), {"duration": 0}]}]
-        result, warnings = validate_and_sanitize_animations(anims, 8, 1)
+        result, warnings = validate_and_sanitize_animations(anims, 8)
         self.assertEqual(len(result[0]["frames"]), 1)
         self.assertTrue(any("dropped" in warning for warning in warnings))
 
     def test_validate_and_sanitize_truncates_animation_count(self):
         anims = [{"name": f"a{i}", "loop": True, "frames": []} for i in range(40)]
-        result, warnings = validate_and_sanitize_animations(anims, 8, 1, max_animations=32)
+        result, warnings = validate_and_sanitize_animations(anims, 8, max_animations=32)
         self.assertEqual(len(result), 32)
         self.assertTrue(any("truncating" in warning for warning in warnings))
 
@@ -93,7 +118,7 @@ class SpriteEditorAnimationTests(unittest.TestCase):
     def tearDown(self):
         self.root.destroy()
 
-    def test_remove_slot_at_index_middle(self):
+    def test_remove_slot_at_index_middle_only_affects_static_sprites(self):
         self.editor.init_sprites(3)
         self.editor.animations = [
             {
@@ -105,17 +130,19 @@ class SpriteEditorAnimationTests(unittest.TestCase):
         self.editor._remove_slot_at_index(1)
         self.assertEqual(len(self.editor.sprites), 2)
         for frame in self.editor.animations[0]["frames"]:
-            self.assertEqual(len(frame["sprites"]), 2)
-            self.assertEqual(len(frame["stack_mask"]), 2)
+            self.assertEqual(len(frame["sprites"]), 3)
+            self.assertEqual(len(frame["stack_mask"]), 3)
 
-    def test_sync_all_animation_slot_counts_on_add(self):
+    def test_add_sprite_in_frame_edit_does_not_change_static_sprites(self):
         self.editor.init_sprites(1)
         self.editor.animations = [
             {"name": "idle", "loop": True, "frames": [make_frame(slots=1)]}
         ]
-        self.editor.sprites.append(self.editor.create_empty_sprite())
-        self.editor._sync_all_animation_slot_counts()
-        self.assertEqual(len(self.editor.animations[0]["frames"][0]["sprites"]), 2)
+        self.editor.current_animation = 0
+        self.editor.select_anim_frame(0)
+        self.editor.add_sprite()
+        self.assertEqual(len(self.editor.sprites), 1)
+        self.assertEqual(len(self.editor._frame_edit_snapshot["sprites"]), 2)
 
     def test_reset_animation_state_clears_edit_flags(self):
         self.editor.anim_edit_mode = True
@@ -134,6 +161,19 @@ class SpriteEditorAnimationTests(unittest.TestCase):
         warnings = self.editor.load_project_data(data)
         self.assertEqual(self.editor.animations, [])
         self.assertEqual(warnings, [])
+        self.assertEqual(self.editor.sprites[0]["name"], default_sprite_name(0))
+
+    def test_rename_sprite_updates_project_sprite(self):
+        self.editor.init_sprites(2)
+        self.editor.rename_sprite(1, "Shield")
+        self.assertEqual(self.editor.sprites[1]["name"], "Shield")
+        self.assertEqual(self.editor._sprite_display_name(1), "Shield")
+
+    def test_sprite_names_persist_in_save_payload(self):
+        self.editor.init_sprites(1)
+        self.editor.rename_sprite(0, "Player")
+        payload = self.editor._build_project_data()
+        self.assertEqual(payload["sprites"][0]["name"], "Player")
 
     def test_v2_json_round_trip(self):
         self.editor.sprite_size_mode = 8
