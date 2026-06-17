@@ -15,7 +15,7 @@ Built with Python and Tkinter — no extra dependencies required.
 - **Frame edit mode** — Edit individual frames with commit/discard and unsaved-change indicators
 - **Animation preview** — Play/stop with hardware-aligned timing on the main canvas
 - **Project files** — Save and load work as JSON (v2 with animations)
-- **Export** — Live assembly panel, clipboard copy, and raw binary file export
+- **Export** — Live assembly panel, clipboard copy, raw binary file export, and customizable ASM format templates
 
 ## Requirements
 
@@ -37,7 +37,7 @@ The window has three columns:
 | **TMS9918 Palette** | Left | Click a swatch to set the active color. `T` is transparent (erases pixels). Current color shown below the grid. |
 | **Project Sprites / Frame Sprites** | Left | Sprite list with stack checkboxes and ↑↓ reorder. Title switches in frame edit mode. |
 | **Drawing Canvas** | Center | Stacked sprite view with mode banner (static edit, frame edit, or preview). Grid always visible. |
-| **Assembly Export** | Center | Live ASM output with **Copy Assembly** and **Save Binary…** buttons. |
+| **Assembly Export** | Center | Live ASM output with a **Format** picker, **Copy Assembly**, and **Save Binary…** buttons. |
 | **Animations** | Right | Animation picker, frame list, frame controls, duration/loop, and preview. |
 | **Status bar** | Bottom | Active sprite, color, stacked count, and animation context. |
 
@@ -162,11 +162,12 @@ Sprites export as `BYTE` directives with 8 hex values per line. An 8×8 sprite i
 4. Bottom-right (rows 8–15, columns 8–15)
 
 ```
-; TMS9918 Sprite 00 16x16 Color 2
-BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
-BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
-BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
-BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
+SPR0
+; Sprite 00 16x16 Color 2
+    BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
+    BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
+    BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
+    BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
 ```
 
 **Animation → Export Animation ASM** produces all frames with timing metadata. Only **stacked** sprite slots are exported per frame (matching the canvas composite).
@@ -174,40 +175,113 @@ BYTE >FF,>00,>FF,>00,>FF,>00,>FF,>00
 Example — two-frame walk cycle (one stacked sprite per frame):
 
 ```asm
-; Animation 'walk' — 2 frames
-; Frame 0: duration=4 screen frames
-; TMS9918 Sprite 00 8x8 Color 2
-BYTE >80,>00,>00,>00,>00,>00,>00,>00
+; Animation: walk
+; Frames: 2
+WALK_F00:
+; Duration: 4 screen frames
+SPR0
+; Sprite 00 8x8 Color 2
+    BYTE >80,>00,>00,>00,>00,>00,>00,>00
 
 
-; Frame 1: duration=8 screen frames
-; TMS9918 Sprite 00 8x8 Color 2
-BYTE >80,>80,>00,>00,>00,>00,>00,>00
+WALK_F01:
+; Duration: 8 screen frames
+SPR1
+; Sprite 00 8x8 Color 2
+    BYTE >80,>80,>00,>00,>00,>00,>00,>00
 
 
-; Durations (screen frames): 4, 8
+WALK_DUR:
+; Frame durations (screen frames)
+    BYTE 4,8
 ; Total cycle: 12 screen frames (~200 ms)
 ```
 
 Example — single frame with two stacked sprites (body + detail layer):
 
 ```asm
-; Animation 'hero' — 1 frames
-; Frame 0: duration=6 screen frames
-; TMS9918 Sprite 00 8x8 Color 2
-BYTE >80,>00,>00,>00,>00,>00,>00,>00
+; Animation: hero
+; Frames: 1
+HERO_F00:
+; Duration: 6 screen frames
+SPR0
+; Sprite 00 8x8 Color 2
+    BYTE >80,>00,>00,>00,>00,>00,>00,>00
+SPR1
+; Sprite 01 8x8 Color 4
+    BYTE >80,>40,>00,>00,>00,>00,>00,>00
 
-; TMS9918 Sprite 01 8x8 Color 4
-BYTE >80,>40,>00,>00,>00,>00,>00,>00
 
-
-; Durations (screen frames): 6
+HERO_DUR:
+; Frame durations (screen frames)
+    BYTE 6
 ; Total cycle: 6 screen frames (~100 ms)
 ```
 
 Each frame section lists its hold time in VDP screen frames, then one `BYTE` block per stacked sprite. The summary at the end totals frame durations for the full loop.
 
-The live assembly panel shows the current sprite, frame-edit stack, or previewed frame. Use **Copy Assembly**, **Ctrl+Shift+C**, or select text directly from the panel.
+The live assembly panel shows the current sprite, frame-edit stack, or previewed frame. Use **Copy Assembly**, **Ctrl+Shift+C**, or select text directly from the panel. Choose a different output style from the **Format** dropdown above the panel.
+
+### Custom export formats
+
+ASM output is driven by JSON templates in [`formats/`](formats/). Pick a format from the **Format** dropdown to change comments, labels, directives, and optional animation metadata.
+
+| File | Description |
+|------|-------------|
+| `ti99_default.json` | TI-99/4A style with SPR labels, frame labels, and a `BYTE` duration table |
+| `ti99_frame_directory.json` | Animation header with frame count and per-frame address/duration entries |
+| `generic_db.json` | `db $XX` style for Z80/6502-like assemblers |
+
+Each format file defines:
+
+- **`dialect`** — Comment prefix, data directive, hex prefix/separator, bytes per line
+- **`labels.patterns`** — Templates for animation, frame, sprite, duration table, and frame-count labels
+- **`animation.sections`** — Toggleable header, per-frame blocks, duration table, frame count, footer
+- **`sprite.sections`** — Single-sprite panel export (comment, optional label, data lines)
+
+Template placeholders include:
+
+| Variable | Meaning |
+|----------|---------|
+| `{anim_name}` | Animation name |
+| `{anim_label}` | Sanitized animation label |
+| `{frame_count}` | Number of frames |
+| `{frame_index}` | Frame index (0-based) |
+| `{duration}` | Frame hold time in screen frames |
+| `{frame_label}` | Sanitized per-frame label |
+| `{slot}` / `{slot:02d}` | Sprite slot index |
+| `{color}` | VDP color index |
+| `{size}` | Sprite size (8 or 16) |
+| `{durations_csv}` | Comma-separated frame durations |
+| `{total_duration}` / `{total_ms}` | Full loop length |
+| `{comment}` | Dialect comment prefix (`;`) |
+| `{data_directive}` / `{data_line}` | Assembler data directive and formatted byte line |
+
+Example default output (`ti99_default.json`):
+
+```asm
+; Animation: walk
+; Frames: 2
+WALK_F00:
+; Duration: 4 screen frames
+SPR0
+; Sprite 00 8x8 Color 2
+    BYTE >80,>00,>00,>00,>00,>00,>00,>00
+
+WALK_F01:
+; Duration: 8 screen frames
+SPR1
+; Sprite 00 8x8 Color 2
+    BYTE >80,>80,>00,>00,>00,>00,>00,>00
+
+WALK_DUR:
+; Frame durations (screen frames)
+    BYTE 4,8
+
+; Total cycle: 12 screen frames (~200 ms)
+```
+
+To add a format, copy an existing file in `formats/`, edit the templates, and restart the editor. Invalid files are skipped at startup.
 
 ### Binary (raw bytes)
 

@@ -103,9 +103,11 @@ class FrameEditTests(unittest.TestCase):
 
     def test_capture_frame_does_not_recurse_with_ui(self):
         editor = SpriteEditor(self.root, create_ui=True)
+        editor.sprite_size_mode = 8
         editor.init_sprites(1)
+        editor.stack_vars = [tk.BooleanVar(value=True)]
         editor.animations = [
-            {"name": "walk", "loop": True, "frames": [make_frame()]}
+            {"name": "walk", "loop": True, "frames": [make_frame(size=8)]}
         ]
         editor.current_animation = 0
         editor._refresh_animation_ui()

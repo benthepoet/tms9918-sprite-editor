@@ -1,0 +1,27 @@
+{
+  "name": "Generic DB",
+  "description": "db $XX directives for Z80/6502-style assemblers",
+  "layout": "default",
+  "dialect": {
+    "comment_prefix": ";",
+    "data_directive": "db",
+    "hex_prefix": "$",
+    "hex_uppercase": true,
+    "hex_width": 2,
+    "value_separator": ",",
+    "bytes_per_line": 8,
+    "indent": "    "
+  },
+  "labels": {
+    "case": "upper",
+    "max_length": 32,
+    "patterns": {
+      "animation": "{anim_name}",
+      "frame": "{anim_label}_F{frame_index:02d}",
+      "sprite": "{frame_label}_S{slot:02d}",
+      "duration_table": "{anim_label}_DUR",
+      "frame_count": "{anim_label}_NFRAMES"
+    }
+  },
+  "duration_table_bytes_per_line": 16
+}

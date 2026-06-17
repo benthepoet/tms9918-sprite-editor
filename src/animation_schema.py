@@ -6,7 +6,19 @@ MAX_FILE_BYTES_WARN = 5_000_000
 
 
 def default_sprite_name(index: int) -> str:
-    return f"Sprite {index:02d}"
+    return f"SPR{index}"
+
+
+def default_animation_name(index: int) -> str:
+    return f"ANIM{index}"
+
+
+def next_default_animation_name(animations: list) -> str:
+    existing = {anim["name"].lower() for anim in animations}
+    index = 0
+    while default_animation_name(index).lower() in existing:
+        index += 1
+    return default_animation_name(index)
 
 
 def sprite_display_name(sprite: dict, index: int) -> str:

@@ -1,0 +1,1 @@
+{indent}DATA {sprite_label},{duration_hex} {comment} Frame {frame_index} address and duration

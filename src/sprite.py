@@ -5,6 +5,18 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+from asm_export import (
+    render_animation,
+    render_frame_block,
+    render_sprite,
+)
+from asm_format_schema import (
+    default_format,
+    format_animation_only,
+    list_formats,
+    load_format_by_id,
+    sanitize_label,
+)
 from binary_export import encode_animation_binary, encode_panel_binary, pattern_to_bytes
 from animation_schema import (
     MAX_FILE_BYTES_WARN,
@@ -17,6 +29,7 @@ from animation_schema import (
     deep_copy_sprites,
     default_sprite_name,
     ensure_sprite_names,
+    next_default_animation_name,
     frames_equal,
     sprite_display_name,
     validate_and_sanitize_animations,
@@ -55,6 +68,11 @@ VDP_FRAME_SEC = 1.0 / 59.94
 CANVAS_BG = "#777777"
 CANVAS_GRID_OUTLINE = "#555555"
 CANVAS_OFF_PIXEL = "#555555"
+STATIC_APP_BG = "#E8F5E9"
+STATIC_MODE_INDICATOR_BG = "#43A047"
+STATIC_BUTTON_BORDER = "#A5D6A7"
+STATIC_BUTTON_LIGHT = "#F1F8F2"
+STATIC_BUTTON_DARK = "#81C784"
 ANIM_EDIT_APP_BG = "#fff7ed"
 ANIM_PREVIEW_APP_BG = "#eef4ff"
 PANEL_TEXT_BG = "#ffffff"
@@ -64,6 +82,11 @@ DIRTY_LABEL_BG = "#fef08a"
 DIRTY_LABEL_FG = "#713f12"
 SAVED_LABEL_BG = "#bbf7d0"
 SAVED_LABEL_FG = "#14532d"
+FRAME_STATUS_ROW_HEIGHT = 26
+PREVIEW_STATUS_ROW_HEIGHT = FRAME_STATUS_ROW_HEIGHT
+BUTTON_DISABLED_BG = "#e5e7eb"
+BUTTON_DISABLED_FG = "#9ca3af"
+BUTTON_DISABLED_BORDER = "#d1d5db"
 
 if os.environ.get("SPRITE_EDITOR_DEBUG"):
     logging.basicConfig(level=logging.DEBUG)
@@ -99,6 +122,8 @@ class SpriteEditor:
         self._preview_fps_ticks = 0
         self._preview_fps_window_start = 0.0
         self._suppress_anim_ui_events = False
+        self._export_format_id, self._export_format = default_format()
+        self._export_formats = list_formats()
 
         if create_ui:
             self.create_ui()
@@ -162,16 +187,6 @@ class SpriteEditor:
         file_menu.add_command(label="New", command=self.new_project)
         file_menu.add_command(label="Load Project", command=self.load_project)
         file_menu.add_command(label="Save Project", command=self.save_project)
-        file_menu.add_separator()
-        file_menu.add_command(
-            label="Copy Assembly to Clipboard",
-            command=self.copy_asm,
-            accelerator="Ctrl+Shift+C",
-        )
-        file_menu.add_command(
-            label="Export Binary…",
-            command=self.export_panel_binary,
-        )
 
         anim_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Animation", menu=anim_menu)
@@ -183,16 +198,11 @@ class SpriteEditor:
             accelerator="Ctrl+Shift+F",
         )
         anim_menu.add_command(label="Duplicate Animation", command=self.duplicate_animation)
-        anim_menu.add_separator()
         anim_menu.add_command(
-            label="Export Animation ASM",
-            command=self.copy_animation_asm,
+            label="Exit Animation Mode",
+            command=self.exit_animation_mode,
+            accelerator="Escape",
         )
-        anim_menu.add_command(
-            label="Export Animation Binary…",
-            command=self.export_animation_binary,
-        )
-        anim_menu.add_command(label="Exit Animation Mode", command=self.exit_animation_mode)
 
         mode_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Mode", menu=mode_menu)
@@ -202,36 +212,18 @@ class SpriteEditor:
         self._ui_style = ttk.Style()
         if "clam" in self._ui_style.theme_names():
             self._ui_style.theme_use("clam")
-        try:
-            self._static_app_bg = self._ui_style.lookup("TFrame", "background") or "#f0f0f0"
-            self._default_label_bg = (
-                self._ui_style.lookup("TLabel", "background") or self._static_app_bg
-            )
-            self._default_button_bg = (
-                self._ui_style.lookup("TButton", "background") or self._static_app_bg
-            )
-            self._default_button_bordercolor = (
-                self._ui_style.lookup("TButton", "bordercolor") or "#9e9a91"
-            )
-            self._default_button_lightcolor = (
-                self._ui_style.lookup("TButton", "lightcolor") or "#eeebe7"
-            )
-            self._default_button_darkcolor = (
-                self._ui_style.lookup("TButton", "darkcolor") or "#cfcdc8"
-            )
-        except tk.TclError:
-            self._static_app_bg = "#f0f0f0"
-            self._default_label_bg = "#f0f0f0"
-            self._default_button_bg = "#f0f0f0"
-            self._default_button_bordercolor = "#9e9a91"
-            self._default_button_lightcolor = "#eeebe7"
-            self._default_button_darkcolor = "#cfcdc8"
+        self._static_app_bg = STATIC_APP_BG
+        self._default_label_bg = STATIC_APP_BG
+        self._default_button_bg = STATIC_APP_BG
+        self._default_button_bordercolor = STATIC_BUTTON_BORDER
+        self._default_button_lightcolor = STATIC_BUTTON_LIGHT
+        self._default_button_darkcolor = STATIC_BUTTON_DARK
 
         self._main_frame = tk.Frame(self.root, bg=self._static_app_bg)
         self._main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         self._left_outer = tk.Frame(self._main_frame, bg=self._static_app_bg, width=300)
-        self._left_outer.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        self._left_outer.pack(side=tk.LEFT, fill=tk.Y)
         self._left_outer.pack_propagate(False)
 
         palette_frame = ttk.LabelFrame(
@@ -316,6 +308,14 @@ class SpriteEditor:
 
         asm_frame = ttk.LabelFrame(self.canvas_frame, text="Assembly Export")
         asm_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+
+        asm_format_row = ttk.Frame(asm_frame)
+        asm_format_row.pack(fill="x", padx=5, pady=(5, 0))
+        ttk.Label(asm_format_row, text="Format:").pack(side=tk.LEFT)
+        self.asm_format_combo = ttk.Combobox(asm_format_row, state="readonly")
+        self.asm_format_combo.pack(side=tk.LEFT, fill="x", expand=True, padx=(6, 0))
+        self.asm_format_combo.bind("<<ComboboxSelected>>", self._on_export_format_selected)
+        self._refresh_asm_format_options()
 
         self.asm_text = tk.Text(
             asm_frame, height=6, font=("Courier", 10), wrap=tk.NONE, bg=PANEL_TEXT_BG
@@ -426,18 +426,20 @@ class SpriteEditor:
 
         anim_btn_row = ttk.Frame(anim_top)
         anim_btn_row.pack(fill="x", pady=(5, 0))
-        ttk.Button(anim_btn_row, text="+", width=3, command=self.create_animation).pack(
-            side=tk.LEFT
+        anim_btn_row.columnconfigure(2, weight=1, uniform="anim_actions")
+        anim_btn_row.columnconfigure(3, weight=1, uniform="anim_actions")
+        ttk.Button(anim_btn_row, text="+", width=3, command=self.create_animation).grid(
+            row=0, column=0, sticky="ew"
         )
-        ttk.Button(anim_btn_row, text="−", width=3, command=self.delete_animation).pack(
-            side=tk.LEFT, padx=(2, 0)
+        ttk.Button(anim_btn_row, text="−", width=3, command=self.delete_animation).grid(
+            row=0, column=1, sticky="ew", padx=(2, 0)
         )
         ttk.Button(
             anim_btn_row, text="Duplicate", command=self.duplicate_animation
-        ).pack(side=tk.LEFT, expand=True, fill="x", padx=(4, 2))
+        ).grid(row=0, column=2, sticky="ew", padx=(4, 2))
         ttk.Button(
             anim_btn_row, text="Rename", command=self.rename_animation_dialog
-        ).pack(side=tk.LEFT, expand=True, fill="x", padx=(2, 0))
+        ).grid(row=0, column=3, sticky="ew", padx=(2, 0))
 
         ttk.Label(anim_panel, text="Frames").pack(anchor="w", padx=5)
         frame_list_row = ttk.Frame(anim_panel)
@@ -460,26 +462,30 @@ class SpriteEditor:
 
         frame_btn_row = ttk.Frame(anim_panel)
         frame_btn_row.pack(fill="x", padx=5, pady=5)
+        frame_btn_row.columnconfigure(0, weight=1, uniform="frame_actions")
+        frame_btn_row.columnconfigure(1, weight=1, uniform="frame_actions")
+        ttk.Button(frame_btn_row, text="+ Frame", command=self.add_anim_frame).grid(
+            row=0, column=0, sticky="ew", padx=(0, 2)
+        )
+        ttk.Button(frame_btn_row, text="− Frame", command=self.delete_anim_frame).grid(
+            row=0, column=1, sticky="ew", padx=(2, 4)
+        )
         frame_order_controls = ttk.Frame(frame_btn_row)
-        frame_order_controls.pack(side=tk.RIGHT)
-        ttk.Button(
+        frame_order_controls.grid(row=0, column=2, sticky="e")
+        self._frame_move_up_btn = ttk.Button(
             frame_order_controls,
             text="↑",
             width=2,
             command=lambda: self.move_anim_frame(-1),
-        ).pack(side=tk.LEFT)
-        ttk.Button(
+        )
+        self._frame_move_up_btn.pack(side=tk.LEFT)
+        self._frame_move_down_btn = ttk.Button(
             frame_order_controls,
             text="↓",
             width=2,
             command=lambda: self.move_anim_frame(1),
-        ).pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Button(frame_btn_row, text="+ Frame", command=self.add_anim_frame).pack(
-            side=tk.LEFT, expand=True, fill="x", padx=(0, 2)
         )
-        ttk.Button(frame_btn_row, text="− Frame", command=self.delete_anim_frame).pack(
-            side=tk.LEFT, expand=True, fill="x", padx=(2, 4)
-        )
+        self._frame_move_down_btn.pack(side=tk.LEFT, padx=(2, 0))
 
         frame_edit_row = ttk.Frame(anim_panel)
         frame_edit_row.pack(fill="x", padx=5, pady=(0, 5))
@@ -491,11 +497,18 @@ class SpriteEditor:
             frame_edit_row, text="Discard Changes", command=self.discard_anim_frame_edits
         )
         self.anim_discard_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(2, 0))
-        self.anim_frame_dirty_label = ttk.Label(anim_panel, text="")
-        self.anim_frame_dirty_label.pack(anchor="w", padx=5, pady=(0, 5))
+        self._anim_frame_status_row = tk.Frame(
+            anim_panel, height=FRAME_STATUS_ROW_HEIGHT
+        )
+        self._anim_frame_status_row.pack(fill="x", padx=5, pady=(0, 5))
+        self._anim_frame_status_row.pack_propagate(False)
+        self.anim_frame_dirty_label = ttk.Label(
+            self._anim_frame_status_row, text="", anchor="center"
+        )
+        self.anim_frame_dirty_label.pack(fill="both", expand=True)
 
         props_row = ttk.Frame(anim_panel)
-        props_row.pack(fill="x", padx=5, pady=5)
+        props_row.pack(fill="x", padx=5, pady=(0, 5))
         ttk.Label(props_row, text="Duration (sf):").pack(side=tk.LEFT)
         self.anim_duration_var = tk.IntVar(value=4)
         self.anim_duration_spin = ttk.Spinbox(
@@ -506,31 +519,36 @@ class SpriteEditor:
             textvariable=self.anim_duration_var,
             command=self._on_duration_changed,
         )
-        self.anim_duration_spin.pack(side=tk.LEFT, padx=5)
+        self.anim_duration_spin.pack(side=tk.LEFT, padx=(4, 0))
         self.anim_duration_var.trace_add("write", self._on_duration_var_changed)
 
         self.anim_loop_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            anim_panel,
-            text="Loop animation",
+            props_row,
+            text="Loop",
             variable=self.anim_loop_var,
             command=self._on_loop_changed,
-        ).pack(anchor="w", padx=5, pady=(0, 5))
+        ).pack(side=tk.RIGHT)
 
-        preview_frame = ttk.LabelFrame(anim_panel, text="Preview")
-        preview_frame.pack(fill="x", padx=5, pady=5)
+        preview_frame = ttk.LabelFrame(anim_panel, text="Preview", padding=(6, 4))
+        preview_frame.pack(fill="x", padx=5, pady=(5, 8))
         preview_btn_row = ttk.Frame(preview_frame)
-        preview_btn_row.pack(fill="x", pady=2)
+        preview_btn_row.pack(fill="x", pady=(0, 4))
         self.anim_play_btn = ttk.Button(
             preview_btn_row, text="▶ Play", command=self.start_anim_preview
         )
-        self.anim_play_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(8, 2))
+        self.anim_play_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(0, 2))
         self.anim_stop_btn = ttk.Button(
             preview_btn_row, text="■ Stop", command=self.stop_anim_preview
         )
-        self.anim_stop_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(2, 8))
-        self.anim_preview_status = ttk.Label(preview_frame, text="")
-        self.anim_preview_status.pack(anchor="w", padx=2, pady=2)
+        self.anim_stop_btn.pack(side=tk.LEFT, expand=True, fill="x", padx=(2, 0))
+        self._anim_preview_status_row = tk.Frame(
+            preview_frame, height=PREVIEW_STATUS_ROW_HEIGHT
+        )
+        self._anim_preview_status_row.pack(fill="x", pady=(0, 2))
+        self._anim_preview_status_row.pack_propagate(False)
+        self.anim_preview_status = ttk.Label(self._anim_preview_status_row, text="")
+        self.anim_preview_status.pack(fill="both", expand=True, anchor="w")
 
         self._bind_anim_frame_list_scroll(self._right_outer, anim_panel)
         self._refresh_animation_ui()
@@ -555,6 +573,7 @@ class SpriteEditor:
                     style_name,
                     background=background,
                     foreground=foreground,
+                    anchor="center",
                     padding=(6, 2),
                 )
             except tk.TclError:
@@ -595,18 +614,31 @@ class SpriteEditor:
         except tk.TclError:
             return
         if button:
+            enabled_fg = foreground if foreground is not None else "#1f2937"
             map_options = {
                 "background": [
+                    ("disabled", BUTTON_DISABLED_BG),
                     ("active", background),
                     ("pressed", background),
                     ("!disabled", background),
                 ],
-                "bordercolor": [("!disabled", bordercolor)],
-                "lightcolor": [("!disabled", lightcolor)],
-                "darkcolor": [("!disabled", darkcolor)],
+                "foreground": [
+                    ("disabled", BUTTON_DISABLED_FG),
+                    ("!disabled", enabled_fg),
+                ],
+                "bordercolor": [
+                    ("disabled", BUTTON_DISABLED_BORDER),
+                    ("!disabled", bordercolor),
+                ],
+                "lightcolor": [
+                    ("disabled", BUTTON_DISABLED_BORDER),
+                    ("!disabled", lightcolor),
+                ],
+                "darkcolor": [
+                    ("disabled", BUTTON_DISABLED_BORDER),
+                    ("!disabled", darkcolor),
+                ],
             }
-            if foreground is not None:
-                map_options["foreground"] = [("!disabled", foreground)]
             style.map(style_name, **map_options)
 
     def _apply_app_theme(self, background):
@@ -666,7 +698,10 @@ class SpriteEditor:
             except tk.TclError:
                 pass
         self._configure_theme_style(
-            "TButton", self._default_button_bg, button=True
+            "TButton",
+            self._default_button_bg,
+            button=True,
+            foreground="#1f2937",
         )
 
         self.root.update_idletasks()
@@ -1143,6 +1178,16 @@ class SpriteEditor:
         logging.debug("preview start animation=%s frame=%s", self.current_animation, start_index)
         self._schedule_anim_preview_tick()
 
+    def _restore_after_preview(self):
+        return_to_edit = self._preview_return_to_frame_edit
+        self._preview_return_to_frame_edit = False
+        logging.debug("preview stop return_to_edit=%s", return_to_edit)
+        if return_to_edit:
+            self.select_anim_frame(self.current_anim_frame)
+        elif hasattr(self, "canvas"):
+            self.refresh_views()
+        self._update_preview_status()
+
     def stop_anim_preview(self):
         if not self.anim_preview_running and self._anim_preview_after_id is None:
             return
@@ -1151,13 +1196,7 @@ class SpriteEditor:
             self.root.after_cancel(self._anim_preview_after_id)
             self._anim_preview_after_id = None
         self._set_preview_ui_state(True)
-        return_to_edit = self._preview_return_to_frame_edit
-        self._preview_return_to_frame_edit = False
-        logging.debug("preview stop return_to_edit=%s", return_to_edit)
-        if return_to_edit:
-            self.select_anim_frame(self.current_anim_frame)
-        elif hasattr(self, "canvas"):
-            self.refresh_views()
+        self._restore_after_preview()
 
     def toggle_anim_preview(self):
         if self.anim_preview_running:
@@ -1199,9 +1238,7 @@ class SpriteEditor:
                     self.root.after_cancel(self._anim_preview_after_id)
                     self._anim_preview_after_id = None
                 self._set_preview_ui_state(True)
-                self._preview_return_to_frame_edit = False
-                if hasattr(self, "canvas"):
-                    self.refresh_views()
+                self._restore_after_preview()
                 logging.debug("preview finished (no loop)")
                 return False
 
@@ -1230,9 +1267,10 @@ class SpriteEditor:
         total = len(frames)
         sf_elapsed = self.anim_preview_frame_counter + 1
         sf_total = frame["duration"]
+        sf_progress = f"sf {sf_elapsed:02d}/{sf_total:02d}"
         txt = (
             f"PREVIEW: {anim['name']} | Frame {self._anim_preview_index + 1}/{total} | "
-            f"sf {sf_elapsed}/{sf_total}"
+            f"{sf_progress}"
         )
         if os.environ.get("SPRITE_EDITOR_DEBUG") and self._preview_fps_window_start:
             self._preview_fps_ticks += 1
@@ -1244,26 +1282,67 @@ class SpriteEditor:
                 self._preview_fps_window_start = time.perf_counter()
         self.status.config(text=txt)
         if hasattr(self, "anim_preview_status"):
-            self.anim_preview_status.config(text=txt)
+            self.anim_preview_status.config(
+                text=(
+                    f"Frame {self._anim_preview_index + 1}/{total} · "
+                    f"{sf_progress}"
+                )
+            )
         self._update_edit_mode_indicator()
+
+    def _iter_ui_buttons(self, parent=None):
+        root = parent or getattr(self, "_main_frame", None) or self.root
+        for child in root.winfo_children():
+            if isinstance(child, (ttk.Button, tk.Button)):
+                yield child
+            yield from self._iter_ui_buttons(child)
 
     def _set_preview_ui_state(self, enabled: bool):
         state = tk.NORMAL if enabled else tk.DISABLED
-        for widget_name in (
-            "anim_play_btn",
-            "anim_combo",
-            "anim_frame_list",
-        ):
+        stop_btn = getattr(self, "anim_stop_btn", None)
+        for btn in self._iter_ui_buttons():
+            if btn is stop_btn:
+                continue
+            try:
+                btn.config(state=state)
+            except tk.TclError:
+                pass
+        for widget_name in ("anim_combo", "anim_frame_list"):
             if hasattr(self, widget_name):
                 try:
                     getattr(self, widget_name).config(state=state)
                 except tk.TclError:
                     pass
         self._set_sprite_slots_enabled(enabled)
-        if hasattr(self, "anim_stop_btn"):
-            self.anim_stop_btn.config(
-                state=tk.DISABLED if enabled else tk.NORMAL
+        if stop_btn is not None:
+            stop_btn.config(state=tk.DISABLED if enabled else tk.NORMAL)
+        if enabled:
+            self._update_frame_edit_controls()
+            self._update_sprite_order_buttons()
+            self._update_frame_order_buttons()
+
+    def _update_frame_order_buttons(self):
+        if not hasattr(self, "_frame_move_up_btn"):
+            return
+        if self.anim_preview_running:
+            state = tk.DISABLED
+            self._frame_move_up_btn.config(state=state)
+            self._frame_move_down_btn.config(state=state)
+            return
+        frame_count = 0
+        if self.current_animation is not None:
+            frame_count = len(
+                self.animations[self.current_animation].get("frames", [])
             )
+        current = self.current_anim_frame
+        self._frame_move_up_btn.config(
+            state=tk.NORMAL if frame_count > 0 and current > 0 else tk.DISABLED
+        )
+        self._frame_move_down_btn.config(
+            state=tk.NORMAL
+            if frame_count > 0 and current < frame_count - 1
+            else tk.DISABLED
+        )
 
     def _on_window_close(self):
         self.stop_anim_preview()
@@ -1352,7 +1431,7 @@ class SpriteEditor:
 
     def create_animation(self, name=None):
         if name is None:
-            name = self._unique_animation_name(f"anim_{len(self.animations)}")
+            name = next_default_animation_name(self.animations)
         self.animations.append({"name": name, "loop": True, "frames": []})
         self.current_animation = len(self.animations) - 1
         self._refresh_animation_ui()
@@ -1448,6 +1527,8 @@ class SpriteEditor:
             self.refresh_views()
 
     def move_anim_frame(self, direction):
+        if self.anim_preview_running:
+            return
         if self.current_animation is None:
             return
         anim = self._current_animation()
@@ -1463,9 +1544,19 @@ class SpriteEditor:
         frames[index], frames[new_index] = frames[new_index], frames[index]
         self.current_anim_frame = new_index
         if self.anim_edit_mode:
-            self.select_anim_frame(new_index)
-        else:
-            self._refresh_animation_ui()
+            frame = frames[new_index]
+            self._frame_edit_snapshot = compact_frame_slots(
+                deep_copy_frame(frame),
+                self.sprite_size_mode,
+                self.current_color,
+            )
+            self.rebuild_sprite_list(
+                source="frame", mask=self._frame_edit_snapshot["stack_mask"]
+            )
+            self._sync_animation_panel_from_snapshot()
+        self._refresh_animation_ui()
+        self.refresh_views()
+        self._update_frame_order_buttons()
 
     def _committed_anim_frame(self):
         if self.current_animation is None:
@@ -1590,6 +1681,7 @@ class SpriteEditor:
         )
         self._sync_animation_panel_from_snapshot()
         self.refresh_views()
+        self._update_frame_order_buttons()
 
     def _leave_anim_frame_edit(self):
         self._frame_edit_snapshot = None
@@ -1599,6 +1691,7 @@ class SpriteEditor:
         self._refresh_animation_ui(select_frame=False)
         self._clear_anim_frame_list_selection()
         self.refresh_views()
+        self._update_frame_order_buttons()
 
     def exit_animation_mode(self, commit=True):
         if self.anim_edit_mode and self._frame_edit_is_dirty():
@@ -1728,6 +1821,7 @@ class SpriteEditor:
                 self._set_anim_frame_list_selection(self.current_anim_frame)
                 if select_frame and self._frame_edit_snapshot is not None:
                     self._set_anim_duration_var(self._frame_edit_snapshot["duration"])
+        self._update_frame_order_buttons()
 
     def _on_escape(self, event=None):
         if self.anim_preview_running:
@@ -1929,6 +2023,7 @@ class SpriteEditor:
         source, mask = self._sprite_list_source()
         self.rebuild_sprite_list(source=source, mask=mask)
         self.update_status()
+        self.update_asm_export()
 
     def select_sprite(self, event=None):
         self.select_sprite_index(self.current_sprite)
@@ -1964,10 +2059,7 @@ class SpriteEditor:
             app_bg = ANIM_EDIT_APP_BG
         else:
             text = "  STATIC EDIT — editing project sprite slots"
-            if self.current_animation is not None:
-                anim = self.animations[self.current_animation]
-                text += f" — animation '{anim['name']}' selected"
-            bg, fg = "#e5e7eb", "#1f2937"
+            bg, fg = STATIC_MODE_INDICATOR_BG, "#ffffff"
             canvas_title = (
                 "Drawing Canvas - Stacked View (LMB=draw on current, RMB=erase on current)"
             )
@@ -1985,6 +2077,7 @@ class SpriteEditor:
                 self._apply_app_theme(app_bg)
             else:
                 self._restore_static_theme()
+        self._refresh_asm_format_options()
 
     def update_status(self):
         sprites = self._active_sprites()
@@ -2172,17 +2265,60 @@ class SpriteEditor:
         messagebox.showinfo("Export Binary", f"Saved {len(data)} bytes to\n{path}")
         return True
 
+    def _asm_in_animation_mode(self):
+        return self.anim_edit_mode or self.anim_preview_running
+
+    def _visible_export_formats(self):
+        animation_mode = self._asm_in_animation_mode()
+        visible = []
+        for format_id, fmt in self._export_formats:
+            if format_animation_only(fmt) and not animation_mode:
+                continue
+            visible.append((format_id, fmt))
+        return visible
+
+    def _refresh_asm_format_options(self):
+        visible = self._visible_export_formats()
+        visible_ids = {format_id for format_id, _fmt in visible}
+        if self._export_format_id not in visible_ids:
+            self._export_format_id = "ti99_default"
+            self._export_format = load_format_by_id("ti99_default")
+        if not hasattr(self, "asm_format_combo"):
+            return
+        self.asm_format_combo["values"] = [fmt["name"] for _format_id, fmt in visible]
+        self._set_asm_format_combo_selection(self._export_format_id)
+
+    def _set_asm_format_combo_selection(self, format_id):
+        if not hasattr(self, "asm_format_combo"):
+            return
+        for index, (candidate_id, _fmt) in enumerate(self._visible_export_formats()):
+            if candidate_id == format_id:
+                self.asm_format_combo.current(index)
+                return
+        visible = self._visible_export_formats()
+        if visible:
+            self.asm_format_combo.current(0)
+            self._export_format_id, self._export_format = visible[0]
+
+    def _on_export_format_selected(self, _event=None):
+        selection = self.asm_format_combo.get()
+        for format_id, fmt in self._visible_export_formats():
+            if fmt["name"] == selection:
+                self._export_format_id = format_id
+                self._export_format = fmt
+                self.update_asm_export()
+                return
+
+    def _active_export_format(self):
+        return self._export_format
+
     def _build_asm_for_sprite_data(self, sprite, slot_index):
-        pattern = sprite["pattern"]
-        col = sprite["color"]
-        size = self.sprite_size_mode
-        bytes_list = self._pattern_to_bytes(pattern, size)
-        asm = f"; TMS9918 Sprite {slot_index:02d} {size}x{size} Color {col}\n"
-        for i in range(0, len(bytes_list), 8):
-            chunk = bytes_list[i:i + 8]
-            hex_vals = ",".join(f">{b:02X}" for b in chunk)
-            asm += f"BYTE {hex_vals}\n"
-        return asm
+        return render_sprite(
+            sprite,
+            slot_index,
+            self.sprite_size_mode,
+            self._active_export_format(),
+        )
 
     def build_asm_text(self, sprite_index=None):
         if sprite_index is None:
@@ -2191,65 +2327,49 @@ class SpriteEditor:
         return self._build_asm_for_sprite_data(sprites[sprite_index], sprite_index)
 
     def build_frame_asm(self, sprites, stack_mask, header=""):
-        indices = self._resolve_stack_indices(stack_mask)
-        parts = []
-        if header:
-            parts.append(header.rstrip("\n"))
-        for slot_idx in indices:
-            parts.append(self._build_asm_for_sprite_data(sprites[slot_idx], slot_idx))
-        return "\n".join(parts)
+        header_lines = [line for line in header.splitlines() if line] if header else None
+        return render_frame_block(
+            sprites,
+            stack_mask,
+            size=self.sprite_size_mode,
+            fmt=self._active_export_format(),
+            header_lines=header_lines,
+        )
 
     def build_animation_asm(self, anim_index):
-        anim = self.animations[anim_index]
-        frames = anim.get("frames", [])
-        lines = [f"; Animation '{anim['name']}' — {len(frames)} frames"]
-        durations = []
-        for index, frame in enumerate(frames):
-            durations.append(frame["duration"])
-            lines.append(f"; Frame {index}: duration={frame['duration']} screen frames")
-            frame_asm = self.build_frame_asm(frame["sprites"], frame["stack_mask"])
-            if frame_asm:
-                lines.append(frame_asm)
-            lines.append("")
-        total_sf = sum(durations)
-        lines.append(f"; Durations (screen frames): {', '.join(str(d) for d in durations)}")
-        lines.append(
-            f"; Total cycle: {total_sf} screen frames (~{total_sf / 59.94 * 1000:.0f} ms)"
+        return render_animation(
+            self.animations[anim_index],
+            self.sprite_size_mode,
+            self._active_export_format(),
         )
-        return "\n".join(lines)
+
+    def _animation_for_panel_export(self):
+        if self.current_animation is None:
+            return None
+        animation = deep_copy_animation(self.animations[self.current_animation])
+        if (
+            self.anim_edit_mode
+            and self._frame_edit_snapshot is not None
+            and self.current_anim_frame < len(animation.get("frames", []))
+        ):
+            animation["frames"][self.current_anim_frame] = deep_copy_frame(
+                self._frame_edit_snapshot
+            )
+        return animation
 
     def _build_asm_panel_text(self):
-        if self.anim_preview_running and self.current_animation is not None:
-            frames = self.animations[self.current_animation]["frames"]
-            frame = frames[self._anim_preview_index]
-            header = f"; Preview frame {self._anim_preview_index + 1}/{len(frames)}\n"
-            return self.build_frame_asm(
-                frame["sprites"], frame["stack_mask"], header=header
-            )
-
-        if self.anim_edit_mode and self._frame_edit_snapshot is not None:
-            snapshot = self._frame_edit_snapshot
-            anim_name = ""
-            if self.current_animation is not None:
-                anim_name = self.animations[self.current_animation]["name"]
-            header = (
-                f"; Animation '{anim_name}' / Frame {self.current_anim_frame} "
-                f"(duration={snapshot['duration']} sf)\n"
-            )
-            return self.build_frame_asm(
-                snapshot["sprites"], snapshot["stack_mask"], header=header
-            )
-
-        asm = self.build_asm_text()
-        if (
-            not self.anim_edit_mode
-            and self.current_animation is not None
-            and self.animations[self.current_animation]["frames"]
+        if self.current_animation is not None and (
+            self.anim_preview_running or self.anim_edit_mode
         ):
-            anim = self.animations[self.current_animation]
-            header = f"; Animation '{anim['name']}' ({len(anim['frames'])} frames)\n"
-            asm = header + asm
-        return asm
+            animation = self._animation_for_panel_export()
+            if animation and animation.get("frames"):
+                return render_animation(
+                    animation,
+                    self.sprite_size_mode,
+                    self._active_export_format(),
+                )
+
+        return self.build_asm_text()
 
     def update_asm_export(self):
         if not hasattr(self, "asm_text"):

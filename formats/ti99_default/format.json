@@ -1,0 +1,28 @@
+{
+  "name": "TI-99/4A Default",
+  "description": "TI-99 BYTE export with frame directory header and labeled sprite data",
+  "layout": "frame_directory",
+  "dialect": {
+    "comment_prefix": ";",
+    "data_directive": "BYTE",
+    "hex_prefix": ">",
+    "hex_uppercase": true,
+    "hex_width": 2,
+    "value_separator": ",",
+    "bytes_per_line": 8,
+    "indent": "    ",
+    "duration_hex_width": 4,
+    "frame_count_hex_width": 2
+  },
+  "labels": {
+    "case": "upper",
+    "max_length": 32,
+    "patterns": {
+      "animation": "{anim_name}",
+      "frame": "{anim_label}_F{frame_index:02d}",
+      "sprite": "{sprite_name}",
+      "duration_table": "{anim_label}_DUR",
+      "frame_count": "{anim_label}_NFRAMES"
+    }
+  }
+}

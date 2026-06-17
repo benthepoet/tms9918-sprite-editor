@@ -11,7 +11,9 @@ from animation_schema import (
     compact_frame_slots,
     deep_copy_frame,
     deep_copy_sprite,
+    default_animation_name,
     default_sprite_name,
+    next_default_animation_name,
     ensure_sprite_names,
     frames_equal,
     normalize_frame_slots,
@@ -260,6 +262,64 @@ class SpriteEditorAnimationTests(unittest.TestCase):
         editor.load_project_data(payload)
         self.assertEqual(editor.current_animation, 0)
         self.assertEqual(editor.anim_combo.get(), "walk")
+
+    def test_create_animation_uses_default_anim_names(self):
+        self.editor.create_animation()
+        self.assertEqual(self.editor.animations[0]["name"], "ANIM0")
+        self.editor.create_animation()
+        self.assertEqual(self.editor.animations[1]["name"], "ANIM1")
+        self.assertEqual(next_default_animation_name(self.editor.animations), "ANIM2")
+
+    def test_frame_order_buttons_follow_selection(self):
+        editor = SpriteEditor(self.root, create_ui=True)
+        editor.sprite_size_mode = 8
+        editor.init_sprites(1)
+        editor.stack_vars = [tk.BooleanVar(value=True)]
+        editor.animations = [
+            {
+                "name": "walk",
+                "loop": True,
+                "frames": [
+                    make_frame(size=8, duration=4),
+                    make_frame(size=8, duration=8),
+                ],
+            }
+        ]
+        editor.current_animation = 0
+        editor.select_anim_frame(0)
+        self.root.update_idletasks()
+        self.assertEqual(str(editor._frame_move_up_btn.cget("state")), "disabled")
+        self.assertEqual(str(editor._frame_move_down_btn.cget("state")), "normal")
+        editor.select_anim_frame(1)
+        self.root.update_idletasks()
+        self.assertEqual(str(editor._frame_move_up_btn.cget("state")), "normal")
+        self.assertEqual(str(editor._frame_move_down_btn.cget("state")), "disabled")
+
+    def test_move_anim_frame_reorders_frames_and_updates_list(self):
+        editor = SpriteEditor(self.root, create_ui=True)
+        editor.sprite_size_mode = 8
+        editor.init_sprites(1)
+        editor.stack_vars = [tk.BooleanVar(value=True)]
+        frame_a = make_frame(size=8, duration=4)
+        frame_b = make_frame(size=8, duration=8)
+        frame_a["sprites"][0]["name"] = "First"
+        frame_b["sprites"][0]["name"] = "Second"
+        editor.animations = [
+            {"name": "walk", "loop": True, "frames": [frame_a, frame_b]}
+        ]
+        editor.current_animation = 0
+        editor.select_anim_frame(0)
+        editor.move_anim_frame(1)
+        self.root.update_idletasks()
+        frames = editor.animations[0]["frames"]
+        self.assertEqual(frames[0]["sprites"][0]["name"], "Second")
+        self.assertEqual(frames[1]["sprites"][0]["name"], "First")
+        self.assertEqual(editor.current_anim_frame, 1)
+        self.assertEqual(
+            editor._frame_edit_snapshot["sprites"][0]["name"], "First"
+        )
+        labels = list(editor.anim_frame_list.get(0, tk.END))
+        self.assertEqual(labels, ["Frame 0 (8 sf)", "Frame 1 (4 sf)"])
 
 
 if __name__ == "__main__":
