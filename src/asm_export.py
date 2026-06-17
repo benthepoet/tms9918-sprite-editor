@@ -11,6 +11,12 @@ def resolve_stack_indices(stack_mask):
     return [index for index, enabled in enumerate(stack_mask) if enabled]
 
 
+def animation_sprite_count(frames: list) -> int:
+    if not frames:
+        return 0
+    return max(len(frame.get("sprites", [])) for frame in frames)
+
+
 def _dialect_context(fmt: dict) -> dict:
     dialect = fmt["dialect"]
     return {
@@ -558,11 +564,18 @@ def render_animation(animation: dict, size: int, fmt: dict) -> str:
 
     layout = fmt.get("layout", "default")
     if layout == "frame_directory":
+        sprite_count = animation_sprite_count(frames)
         frame_count_hex_width = fmt["dialect"].get("frame_count_hex_width", 2)
+        anim_context["sprite_count"] = sprite_count
         anim_context["frame_count_hex"] = _format_hex_value(
             anim_context["frame_count"],
             fmt,
             width=frame_count_hex_width,
+        )
+        header_values = [anim_context["frame_count"], sprite_count]
+        anim_context["frame_count_header_hex"] = _format_hex_values(
+            header_values,
+            fmt,
         )
         anim_context["frame_count_line"] = _render_tpl(fmt, "frame_count_line", anim_context)
         anim_context["frame_directory_lines"] = _render_frame_directory_lines(

@@ -183,6 +183,40 @@ class SpriteEditorAnimationTests(unittest.TestCase):
         self.assertEqual(len(self.editor.sprites), 1)
         self.assertEqual(len(self.editor._frame_edit_snapshot["sprites"]), 2)
 
+    def test_add_sprite_in_frame_edit_pads_other_frames(self):
+        self.editor.init_sprites(1)
+        self.editor.animations = [
+            {
+                "name": "walk",
+                "loop": True,
+                "frames": [make_frame(slots=1), make_frame(slots=1)],
+            }
+        ]
+        self.editor.current_animation = 0
+        self.editor.select_anim_frame(0)
+        self.editor.add_sprite()
+        self.assertEqual(len(self.editor._frame_edit_snapshot["sprites"]), 2)
+        self.assertEqual(len(self.editor.animations[0]["frames"][1]["sprites"]), 2)
+        self.assertTrue(self.editor.animations[0]["frames"][1]["stack_mask"][1])
+
+    def test_discard_frame_edit_trims_autopadded_slots(self):
+        self.editor.init_sprites(1)
+        self.editor.animations = [
+            {
+                "name": "walk",
+                "loop": True,
+                "frames": [make_frame(slots=1), make_frame(slots=1)],
+            }
+        ]
+        self.editor.current_animation = 0
+        self.editor.select_anim_frame(0)
+        self.editor.add_sprite()
+        self.editor.discard_anim_frame_edits()
+        for frame in self.editor.animations[0]["frames"]:
+            self.assertEqual(len(frame["sprites"]), 1)
+        self.assertEqual(len(self.editor._frame_edit_snapshot["sprites"]), 1)
+        self.assertFalse(self.editor._frame_edit_is_dirty())
+
     def test_reset_animation_state_clears_edit_flags(self):
         self.editor.anim_edit_mode = True
         self.editor._frame_edit_snapshot = make_frame()

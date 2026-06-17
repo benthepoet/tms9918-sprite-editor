@@ -21,7 +21,7 @@ from binary_export import encode_animation_binary, encode_panel_binary, pattern_
 from animation_schema import (
     MAX_FILE_BYTES_WARN,
     MAX_FRAMES_PER_ANIM,
-    compact_frame_slots,
+    animation_frame_slot_count,
     create_empty_sprite_dict,
     deep_copy_animation,
     deep_copy_frame,
@@ -30,8 +30,12 @@ from animation_schema import (
     default_sprite_name,
     ensure_sprite_names,
     next_default_animation_name,
+    next_unique_sprite_name,
     frames_equal,
+    normalize_frame_slots,
     sprite_display_name,
+    sync_animation_frame_slot_counts,
+    trim_autopadded_slots,
     validate_and_sanitize_animations,
 )
 
@@ -1027,6 +1031,45 @@ class SpriteEditor:
             return "frame", self._frame_edit_snapshot["stack_mask"]
         return "static", None
 
+    def _normalize_frame_for_edit(self, frame: dict) -> dict:
+        anim = self._current_animation()
+        target = 1
+        if anim is not None:
+            target = max(animation_frame_slot_count(anim), 1)
+        return normalize_frame_slots(
+            deep_copy_frame(frame),
+            target,
+            self.sprite_size_mode,
+            self.current_color,
+            stack_padded=True,
+        )
+
+    def _pad_other_animation_frames(self, target_count: int) -> None:
+        anim = self._current_animation()
+        if anim is None:
+            return
+        for index, frame in enumerate(anim["frames"]):
+            if index != self.current_anim_frame:
+                normalize_frame_slots(
+                    frame,
+                    target_count,
+                    self.sprite_size_mode,
+                    self.current_color,
+                    stack_padded=True,
+                )
+
+    def _remove_sprite_slot_from_other_frames(self, index: int) -> None:
+        anim = self._current_animation()
+        if anim is None:
+            return
+        for frame_index, frame in enumerate(anim["frames"]):
+            if frame_index == self.current_anim_frame:
+                continue
+            if index < len(frame["sprites"]):
+                del frame["sprites"][index]
+            if index < len(frame["stack_mask"]):
+                del frame["stack_mask"][index]
+
     def add_sprite(self):
         if self.anim_preview_running:
             return
@@ -1038,15 +1081,17 @@ class SpriteEditor:
                 create_empty_sprite_dict(
                     size,
                     self.current_color,
-                    default_sprite_name(new_index),
+                    next_unique_sprite_name(snapshot["sprites"]),
                 )
             )
             snapshot["stack_mask"].append(True)
+            self._pad_other_animation_frames(len(snapshot["sprites"]))
             self.current_sprite = new_index
             self.rebuild_sprite_list(
                 source="frame", mask=snapshot["stack_mask"]
             )
             self.refresh_views()
+            self._update_frame_edit_controls()
             return
         self.sprites.append(self.create_empty_sprite())
         self.current_sprite = len(self.sprites) - 1
@@ -1072,11 +1117,13 @@ class SpriteEditor:
             index = self.current_sprite
             del snapshot["sprites"][index]
             del snapshot["stack_mask"][index]
+            self._remove_sprite_slot_from_other_frames(index)
             self.current_sprite = min(index, len(snapshot["sprites"]) - 1)
             self.rebuild_sprite_list(
                 source="frame", mask=snapshot["stack_mask"]
             )
             self.refresh_views()
+            self._update_frame_edit_controls()
             return
         if len(self.sprites) <= 1:
             messagebox.showinfo("Remove Sprite", "At least one sprite is required.")
@@ -1381,12 +1428,6 @@ class SpriteEditor:
             self._frame_edit_snapshot["stack_mask"] = [v.get() for v in self.stack_vars]
         self.refresh_views()
 
-    def _capture_stack_mask(self):
-        mask = [v.get() for v in self.stack_vars]
-        if self.current_sprite < len(mask):
-            mask[self.current_sprite] = True
-        return mask
-
     def _capture_sprites_for_frame(self, sprites, stack_mask):
         captured = []
         for index, sprite in enumerate(sprites):
@@ -1398,14 +1439,21 @@ class SpriteEditor:
         if self.anim_edit_mode and self._frame_edit_snapshot is not None:
             stack_mask = self._frame_edit_snapshot["stack_mask"][:]
             sprites = self._frame_edit_snapshot["sprites"]
+            captured_sprites = self._capture_sprites_for_frame(sprites, stack_mask)
         else:
-            stack_mask = self._capture_stack_mask()
-            sprites = self.sprites
-        captured_sprites = self._capture_sprites_for_frame(sprites, stack_mask)
+            index = self.current_sprite
+            if 0 <= index < len(self.sprites):
+                captured = deep_copy_sprite(self.sprites[index])
+                captured["name"] = default_sprite_name(0)
+                captured_sprites = [captured]
+            else:
+                captured_sprites = []
         if not captured_sprites:
             captured_sprites = [
                 create_empty_sprite_dict(
-                    self.sprite_size_mode, self.current_color
+                    self.sprite_size_mode,
+                    self.current_color,
+                    default_sprite_name(0),
                 )
             ]
         return {
@@ -1502,6 +1550,9 @@ class SpriteEditor:
             return
         duration = self.anim_duration_var.get() if hasattr(self, "anim_duration_var") else 4
         anim["frames"].append(self._capture_current_state_as_frame(duration=duration))
+        sync_animation_frame_slot_counts(
+            anim, self.sprite_size_mode, self.current_color
+        )
         new_index = len(anim["frames"]) - 1
         self._refresh_animation_ui(select_frame=False)
         self.select_anim_frame(new_index)
@@ -1545,11 +1596,7 @@ class SpriteEditor:
         self.current_anim_frame = new_index
         if self.anim_edit_mode:
             frame = frames[new_index]
-            self._frame_edit_snapshot = compact_frame_slots(
-                deep_copy_frame(frame),
-                self.sprite_size_mode,
-                self.current_color,
-            )
+            self._frame_edit_snapshot = self._normalize_frame_for_edit(frame)
             self.rebuild_sprite_list(
                 source="frame", mask=self._frame_edit_snapshot["stack_mask"]
             )
@@ -1597,8 +1644,15 @@ class SpriteEditor:
         if not (1 <= duration <= 255):
             messagebox.showerror("Invalid Duration", "Duration must be 1–255 screen frames.")
             return False
-        self.animations[self.current_animation]["frames"][self.current_anim_frame] = (
-            deep_copy_frame(self._frame_edit_snapshot)
+        anim = self.animations[self.current_animation]
+        anim["frames"][self.current_anim_frame] = deep_copy_frame(
+            self._frame_edit_snapshot
+        )
+        sync_animation_frame_slot_counts(
+            anim,
+            self.sprite_size_mode,
+            self.current_color,
+            target_count=len(self._frame_edit_snapshot["sprites"]),
         )
         self._update_frame_edit_controls()
         return True
@@ -1615,16 +1669,19 @@ class SpriteEditor:
         committed = self._committed_anim_frame()
         if committed is None:
             return
-        self._frame_edit_snapshot = compact_frame_slots(
-            deep_copy_frame(committed),
-            self.sprite_size_mode,
-            self.current_color,
-        )
+        anim = self._current_animation()
+        if anim is not None:
+            trim_autopadded_slots(anim, len(committed["sprites"]))
+            sync_animation_frame_slot_counts(
+                anim, self.sprite_size_mode, self.current_color
+            )
+        self._frame_edit_snapshot = self._normalize_frame_for_edit(committed)
         self.rebuild_sprite_list(
             source="frame", mask=self._frame_edit_snapshot["stack_mask"]
         )
         self._sync_animation_panel_from_snapshot()
         self.refresh_views()
+        self._update_frame_edit_controls()
 
     def _update_frame_edit_controls(self):
         if not hasattr(self, "anim_commit_btn"):
@@ -1669,17 +1726,13 @@ class SpriteEditor:
         if self._static_stack_mask is None:
             self._static_stack_mask = [v.get() for v in self.stack_vars]
         frame = anim["frames"][index]
-        self._frame_edit_snapshot = compact_frame_slots(
-            deep_copy_frame(frame),
-            self.sprite_size_mode,
-            self.current_color,
-        )
+        self._frame_edit_snapshot = self._normalize_frame_for_edit(frame)
         self.current_anim_frame = index
         self.anim_edit_mode = True
         self.rebuild_sprite_list(
             source="frame", mask=self._frame_edit_snapshot["stack_mask"]
         )
-        self._sync_animation_panel_from_snapshot()
+        self._refresh_animation_ui(select_frame=True)
         self.refresh_views()
         self._update_frame_order_buttons()
 

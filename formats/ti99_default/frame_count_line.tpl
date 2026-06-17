@@ -1,1 +1,1 @@
-{indent}{data_directive} {frame_count_hex}    {comment} Frame count
+{indent}{data_directive} {frame_count_header_hex}    {comment} Frame count, sprite count

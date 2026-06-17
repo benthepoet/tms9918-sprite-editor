@@ -39,7 +39,10 @@ class AsmExportTests(unittest.TestCase):
         ]
         asm = self.editor.build_animation_asm(0)
         self.assertIn("WALK", asm)
-        self.assertIn("    BYTE >02    ; Frame count", asm)
+        self.assertIn(
+            "    BYTE >02,>02    ; Frame count, sprite count",
+            asm,
+        )
         self.assertIn("    DATA WALK_SPR0_F00,>0004 ; Frame 0 address and duration", asm)
         self.assertIn("    DATA WALK_SPR0_F01,>0008 ; Frame 1 address and duration", asm)
         sprite_labels = [
@@ -72,7 +75,10 @@ class AsmExportTests(unittest.TestCase):
         self.editor.select_anim_frame(0)
         text = self.editor._build_asm_panel_text()
         self.assertIn("WALK", text)
-        self.assertIn("    BYTE >01    ; Frame count", text)
+        self.assertIn(
+            "    BYTE >01,>02    ; Frame count, sprite count",
+            text,
+        )
         self.assertIn("    DATA WALK_SPR0_F00,>0006 ; Frame 0 address and duration", text)
         self.assertIn("WALK_SPR0_F00", text)
         self.assertIn("WALK_SPR1_F00", text)
@@ -118,7 +124,10 @@ class AsmExportTests(unittest.TestCase):
         self.editor._anim_preview_index = 1
         text = self.editor._build_asm_panel_text()
         self.assertIn("IDLE", text)
-        self.assertIn("    BYTE >02    ; Frame count", text)
+        self.assertIn(
+            "    BYTE >02,>01    ; Frame count, sprite count",
+            text,
+        )
         self.assertIn("    DATA IDLE_SPR0_F00,>0004 ; Frame 0 address and duration", text)
         self.assertIn("    DATA IDLE_SPR0_F01,>0008 ; Frame 1 address and duration", text)
 

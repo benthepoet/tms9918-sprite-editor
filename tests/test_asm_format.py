@@ -42,7 +42,7 @@ class AsmFormatTests(unittest.TestCase):
             asm.splitlines()[:3],
             [
                 "WALK",
-                "    BYTE >02    ; Frame count",
+                "    BYTE >02,>01    ; Frame count, sprite count",
                 "    DATA WALK_SPR0_F00,>0004 ; Frame 0 address and duration",
             ],
         )
@@ -96,13 +96,26 @@ class AsmFormatTests(unittest.TestCase):
             asm.splitlines()[:3],
             [
                 "ANIM0",
-                "    BYTE >01    ; Frame count",
+                "    BYTE >01,>01    ; Frame count, sprite count",
                 "    DATA ANIM0_SPR0_F00,>0020 ; Frame 0 address and duration",
             ],
         )
         sprite_section = asm.split("\n\n", 1)[1]
         self.assertTrue(sprite_section.startswith("ANIM0_SPR0_F00\n"))
         self.assertIn("    BYTE ", sprite_section)
+
+    def test_ti99_default_includes_sprite_count(self):
+        frame0 = make_frame(slots=2, duration=4)
+        frame1 = make_frame(slots=2, duration=8)
+        frame0["stack_mask"] = [True, True]
+        frame1["stack_mask"] = [True]
+        anim = {"name": "ANIM0", "loop": True, "frames": [frame0, frame1]}
+        fmt = load_format_by_id("ti99_default")
+        asm = render_animation(anim, 8, fmt)
+        self.assertIn(
+            "    BYTE >02,>02    ; Frame count, sprite count",
+            asm,
+        )
 
     def test_ti99_default_uses_sprite_names_as_labels(self):
         frame0 = make_frame(slots=2, duration=4)
