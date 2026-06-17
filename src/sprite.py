@@ -6,8 +6,6 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from asm_export import (
-    build_sprite_index_map,
-    build_sprite_label_map,
     render_animation,
     render_frame_block,
     render_sprite,
@@ -31,6 +29,7 @@ from animation_schema import (
     deep_copy_sprites,
     default_sprite_name,
     ensure_sprite_names,
+    next_default_animation_name,
     frames_equal,
     sprite_display_name,
     validate_and_sanitize_animations,
@@ -188,16 +187,6 @@ class SpriteEditor:
         file_menu.add_command(label="New", command=self.new_project)
         file_menu.add_command(label="Load Project", command=self.load_project)
         file_menu.add_command(label="Save Project", command=self.save_project)
-        file_menu.add_separator()
-        file_menu.add_command(
-            label="Copy Assembly to Clipboard",
-            command=self.copy_asm,
-            accelerator="Ctrl+Shift+C",
-        )
-        file_menu.add_command(
-            label="Export Binary…",
-            command=self.export_panel_binary,
-        )
 
         anim_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Animation", menu=anim_menu)
@@ -209,16 +198,11 @@ class SpriteEditor:
             accelerator="Ctrl+Shift+F",
         )
         anim_menu.add_command(label="Duplicate Animation", command=self.duplicate_animation)
-        anim_menu.add_separator()
         anim_menu.add_command(
-            label="Export Animation ASM",
-            command=self.copy_animation_asm,
+            label="Exit Animation Mode",
+            command=self.exit_animation_mode,
+            accelerator="Escape",
         )
-        anim_menu.add_command(
-            label="Export Animation Binary…",
-            command=self.export_animation_binary,
-        )
-        anim_menu.add_command(label="Exit Animation Mode", command=self.exit_animation_mode)
 
         mode_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Mode", menu=mode_menu)
@@ -488,18 +472,20 @@ class SpriteEditor:
         )
         frame_order_controls = ttk.Frame(frame_btn_row)
         frame_order_controls.grid(row=0, column=2, sticky="e")
-        ttk.Button(
+        self._frame_move_up_btn = ttk.Button(
             frame_order_controls,
             text="↑",
             width=2,
             command=lambda: self.move_anim_frame(-1),
-        ).pack(side=tk.LEFT)
-        ttk.Button(
+        )
+        self._frame_move_up_btn.pack(side=tk.LEFT)
+        self._frame_move_down_btn = ttk.Button(
             frame_order_controls,
             text="↓",
             width=2,
             command=lambda: self.move_anim_frame(1),
-        ).pack(side=tk.LEFT, padx=(2, 0))
+        )
+        self._frame_move_down_btn.pack(side=tk.LEFT, padx=(2, 0))
 
         frame_edit_row = ttk.Frame(anim_panel)
         frame_edit_row.pack(fill="x", padx=5, pady=(0, 5))
@@ -1333,6 +1319,30 @@ class SpriteEditor:
         if enabled:
             self._update_frame_edit_controls()
             self._update_sprite_order_buttons()
+            self._update_frame_order_buttons()
+
+    def _update_frame_order_buttons(self):
+        if not hasattr(self, "_frame_move_up_btn"):
+            return
+        if self.anim_preview_running:
+            state = tk.DISABLED
+            self._frame_move_up_btn.config(state=state)
+            self._frame_move_down_btn.config(state=state)
+            return
+        frame_count = 0
+        if self.current_animation is not None:
+            frame_count = len(
+                self.animations[self.current_animation].get("frames", [])
+            )
+        current = self.current_anim_frame
+        self._frame_move_up_btn.config(
+            state=tk.NORMAL if frame_count > 0 and current > 0 else tk.DISABLED
+        )
+        self._frame_move_down_btn.config(
+            state=tk.NORMAL
+            if frame_count > 0 and current < frame_count - 1
+            else tk.DISABLED
+        )
 
     def _on_window_close(self):
         self.stop_anim_preview()
@@ -1421,7 +1431,7 @@ class SpriteEditor:
 
     def create_animation(self, name=None):
         if name is None:
-            name = self._unique_animation_name(f"anim_{len(self.animations)}")
+            name = next_default_animation_name(self.animations)
         self.animations.append({"name": name, "loop": True, "frames": []})
         self.current_animation = len(self.animations) - 1
         self._refresh_animation_ui()
@@ -1517,6 +1527,8 @@ class SpriteEditor:
             self.refresh_views()
 
     def move_anim_frame(self, direction):
+        if self.anim_preview_running:
+            return
         if self.current_animation is None:
             return
         anim = self._current_animation()
@@ -1532,9 +1544,19 @@ class SpriteEditor:
         frames[index], frames[new_index] = frames[new_index], frames[index]
         self.current_anim_frame = new_index
         if self.anim_edit_mode:
-            self.select_anim_frame(new_index)
-        else:
-            self._refresh_animation_ui()
+            frame = frames[new_index]
+            self._frame_edit_snapshot = compact_frame_slots(
+                deep_copy_frame(frame),
+                self.sprite_size_mode,
+                self.current_color,
+            )
+            self.rebuild_sprite_list(
+                source="frame", mask=self._frame_edit_snapshot["stack_mask"]
+            )
+            self._sync_animation_panel_from_snapshot()
+        self._refresh_animation_ui()
+        self.refresh_views()
+        self._update_frame_order_buttons()
 
     def _committed_anim_frame(self):
         if self.current_animation is None:
@@ -1659,6 +1681,7 @@ class SpriteEditor:
         )
         self._sync_animation_panel_from_snapshot()
         self.refresh_views()
+        self._update_frame_order_buttons()
 
     def _leave_anim_frame_edit(self):
         self._frame_edit_snapshot = None
@@ -1668,6 +1691,7 @@ class SpriteEditor:
         self._refresh_animation_ui(select_frame=False)
         self._clear_anim_frame_list_selection()
         self.refresh_views()
+        self._update_frame_order_buttons()
 
     def exit_animation_mode(self, commit=True):
         if self.anim_edit_mode and self._frame_edit_is_dirty():
@@ -1797,6 +1821,7 @@ class SpriteEditor:
                 self._set_anim_frame_list_selection(self.current_anim_frame)
                 if select_frame and self._frame_edit_snapshot is not None:
                     self._set_anim_duration_var(self._frame_edit_snapshot["duration"])
+        self._update_frame_order_buttons()
 
     def _on_escape(self, event=None):
         if self.anim_preview_running:
@@ -2034,9 +2059,6 @@ class SpriteEditor:
             app_bg = ANIM_EDIT_APP_BG
         else:
             text = "  STATIC EDIT — editing project sprite slots"
-            if self.current_animation is not None:
-                anim = self.animations[self.current_animation]
-                text += f" — animation '{anim['name']}' selected"
             bg, fg = STATIC_MODE_INDICATOR_BG, "#ffffff"
             canvas_title = (
                 "Drawing Canvas - Stacked View (LMB=draw on current, RMB=erase on current)"
@@ -2290,27 +2312,6 @@ class SpriteEditor:
     def _active_export_format(self):
         return self._export_format
 
-    def _animation_export_labels(self, fmt):
-        if self.current_animation is None:
-            return None, None
-        animation = self.animations[self.current_animation]
-        frames = animation.get("frames", [])
-        if not frames:
-            return build_sprite_index_map(frames), None
-        label_settings = fmt.get("labels", {})
-        patterns = label_settings.get("patterns", {})
-        anim_label = sanitize_label(
-            patterns.get("animation", "{anim_name}").format(
-                anim_name=animation.get("name", "")
-            ),
-            case=label_settings.get("case", "upper"),
-            max_length=label_settings.get("max_length", 32),
-        )
-        return (
-            build_sprite_index_map(frames),
-            build_sprite_label_map(frames, fmt, anim_label),
-        )
-
     def _build_asm_for_sprite_data(self, sprite, slot_index):
         return render_sprite(
             sprite,
@@ -2342,62 +2343,31 @@ class SpriteEditor:
             self._active_export_format(),
         )
 
-    def _build_asm_panel_text(self):
-        fmt = self._active_export_format()
-        comment = fmt["dialect"]["comment_prefix"]
-        if self.anim_preview_running and self.current_animation is not None:
-            animation = self.animations[self.current_animation]
-            frames = animation["frames"]
-            frame = frames[self._anim_preview_index]
-            header_lines = [
-                f"{comment} Preview frame {self._anim_preview_index + 1}/{len(frames)}"
-            ]
-            sprite_indices, sprite_labels = self._animation_export_labels(fmt)
-            return render_frame_block(
-                frame["sprites"],
-                frame["stack_mask"],
-                size=self.sprite_size_mode,
-                fmt=fmt,
-                header_lines=header_lines,
-                frame_index=self._anim_preview_index,
-                duration=frame.get("duration", 4),
-                anim_label=sanitize_label(
-                    animation.get("name", ""),
-                    case=fmt.get("labels", {}).get("case", "upper"),
-                    max_length=fmt.get("labels", {}).get("max_length", 32),
-                ),
-                sprite_indices=sprite_indices,
-                sprite_labels=sprite_labels,
+    def _animation_for_panel_export(self):
+        if self.current_animation is None:
+            return None
+        animation = deep_copy_animation(self.animations[self.current_animation])
+        if (
+            self.anim_edit_mode
+            and self._frame_edit_snapshot is not None
+            and self.current_anim_frame < len(animation.get("frames", []))
+        ):
+            animation["frames"][self.current_anim_frame] = deep_copy_frame(
+                self._frame_edit_snapshot
             )
+        return animation
 
-        if self.anim_edit_mode and self._frame_edit_snapshot is not None:
-            snapshot = self._frame_edit_snapshot
-            anim_name = ""
-            if self.current_animation is not None:
-                anim_name = self.animations[self.current_animation]["name"]
-            header_lines = [
-                (
-                    f"{comment} Animation '{anim_name}' / Frame {self.current_anim_frame} "
-                    f"(duration={snapshot['duration']} sf)"
+    def _build_asm_panel_text(self):
+        if self.current_animation is not None and (
+            self.anim_preview_running or self.anim_edit_mode
+        ):
+            animation = self._animation_for_panel_export()
+            if animation and animation.get("frames"):
+                return render_animation(
+                    animation,
+                    self.sprite_size_mode,
+                    self._active_export_format(),
                 )
-            ]
-            sprite_indices, sprite_labels = self._animation_export_labels(fmt)
-            return render_frame_block(
-                snapshot["sprites"],
-                snapshot["stack_mask"],
-                size=self.sprite_size_mode,
-                fmt=fmt,
-                header_lines=header_lines,
-                frame_index=self.current_anim_frame,
-                duration=snapshot.get("duration", 4),
-                anim_label=sanitize_label(
-                    anim_name,
-                    case=fmt.get("labels", {}).get("case", "upper"),
-                    max_length=fmt.get("labels", {}).get("max_length", 32),
-                ),
-                sprite_indices=sprite_indices,
-                sprite_labels=sprite_labels,
-            )
 
         return self.build_asm_text()
 

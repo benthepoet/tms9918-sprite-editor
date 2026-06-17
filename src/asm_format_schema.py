@@ -2,10 +2,17 @@ import json
 import re
 from pathlib import Path
 
-SUPPORTED_VERSION = 1
 DEFAULT_FORMAT_ID = "ti99_default"
+FORMAT_CONFIG_NAME = "format.json"
 
 _LABEL_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_]+")
+
+_REQUIRED_DIALECT_KEYS = (
+    "comment_prefix",
+    "data_directive",
+    "hex_prefix",
+    "value_separator",
+)
 
 
 def formats_dir() -> Path:
@@ -45,37 +52,13 @@ def _require_string(data: dict, key: str) -> str:
     return value
 
 
-def _validate_lines(section: dict, path: str) -> None:
-    lines = section.get("lines")
-    if lines is None:
-        raise ValueError(f"{path}.lines is required when enabled")
-    if not isinstance(lines, list) or not lines:
-        raise ValueError(f"{path}.lines must be a non-empty array")
-    for line in lines:
-        if not isinstance(line, str):
-            raise ValueError(f"{path}.lines must contain strings")
-
-
-def _validate_template_section(section: dict, path: str) -> None:
-    if "template" not in section:
-        raise ValueError(f"{path}.template is required when enabled")
-
-
 def validate_format(data: dict) -> dict:
     if not isinstance(data, dict):
-        raise ValueError("Format file must be a JSON object")
-    version = data.get("version")
-    if version != SUPPORTED_VERSION:
-        raise ValueError(f"Unsupported format version: {version}")
+        raise ValueError("Format config must be a JSON object")
 
     _require_string(data, "name")
     dialect = _require_mapping(data, "dialect")
-    for key in (
-        "comment_prefix",
-        "data_directive",
-        "hex_prefix",
-        "value_separator",
-    ):
+    for key in _REQUIRED_DIALECT_KEYS:
         _require_string(dialect, key)
     if "hex_width" in dialect and not isinstance(dialect["hex_width"], int):
         raise ValueError("dialect.hex_width must be an integer")
@@ -83,63 +66,76 @@ def validate_format(data: dict) -> dict:
         raise ValueError("dialect.bytes_per_line must be an integer")
 
     labels = data.get("labels", {})
-    if not isinstance(labels, dict):
+    if labels and not isinstance(labels, dict):
         raise ValueError("labels must be an object")
     patterns = labels.get("patterns", {})
     if patterns and not isinstance(patterns, dict):
         raise ValueError("labels.patterns must be an object")
 
-    animation = _require_mapping(data, "animation")
-    anim_sections = _require_mapping(animation, "sections")
-    for section_name in ("header", "frames", "footer"):
-        if section_name not in anim_sections:
-            raise ValueError(f"animation.sections.{section_name} is required")
+    layout = data.get("layout", "default")
+    if layout not in ("default", "frame_directory"):
+        raise ValueError(f"Unsupported layout: {layout}")
 
-    frames = _require_mapping(anim_sections, "frames")
-    per_frame = _require_mapping(frames, "per_frame")
-    per_sprite = _require_mapping(frames, "per_sprite")
-    if per_frame.get("enabled", True):
-        _validate_lines(per_frame, "animation.sections.frames.per_frame")
-    if per_sprite.get("enabled", True):
-        for key in ("comment", "data"):
-            subsection = per_sprite.get(key, {})
-            if subsection.get("enabled", True):
-                _validate_template_section(subsection, f"animation.sections.frames.per_sprite.{key}")
-
-    sprite = _require_mapping(data, "sprite")
-    sprite_sections = _require_mapping(sprite, "sections")
-    for key in ("comment", "data"):
-        subsection = sprite_sections.get(key, {})
-        if subsection.get("enabled", True):
-            _validate_template_section(subsection, f"sprite.sections.{key}")
+    templates = data.get("templates")
+    if templates is not None and not isinstance(templates, dict):
+        raise ValueError("templates must be an object")
 
     return data
 
 
+def _load_templates(format_dir: Path) -> dict[str, str]:
+    templates = {}
+    for path in sorted(format_dir.glob("*.tpl")):
+        templates[path.stem] = path.read_text(encoding="utf-8").strip("\n")
+    if not templates:
+        raise ValueError(f"No .tpl files found in {format_dir}")
+    return templates
+
+
 def load_format(path: Path) -> dict:
-    with path.open(encoding="utf-8") as handle:
+    if path.is_dir():
+        config_path = path / FORMAT_CONFIG_NAME
+        format_dir = path
+    else:
+        config_path = path
+        format_dir = path.parent
+
+    with config_path.open(encoding="utf-8") as handle:
         data = json.load(handle)
-    return validate_format(data)
+    fmt = validate_format(data)
+    fmt["templates"] = _load_templates(format_dir)
+    fmt["format_id"] = format_dir.name
+    return fmt
 
 
 def list_formats() -> list[tuple[str, dict]]:
     directory = formats_dir()
     if not directory.is_dir():
         return []
+
     formats = []
-    for path in sorted(directory.glob("*.json")):
+    for config_path in sorted(directory.glob(f"*/{FORMAT_CONFIG_NAME}")):
+        format_id = config_path.parent.name
         try:
-            formats.append((path.stem, load_format(path)))
+            formats.append((format_id, load_format(config_path.parent)))
         except (OSError, json.JSONDecodeError, ValueError):
             continue
     return formats
 
 
 def load_format_by_id(format_id: str) -> dict:
-    path = formats_dir() / f"{format_id}.json"
-    if not path.is_file():
+    path = formats_dir() / format_id
+    config_path = path / FORMAT_CONFIG_NAME
+    if not config_path.is_file():
         raise FileNotFoundError(f"Export format not found: {format_id}")
     return load_format(path)
+
+
+def get_template(fmt: dict, name: str) -> str:
+    templates = fmt.get("templates", {})
+    if name not in templates:
+        raise KeyError(f"Template '{name}' not found for format {fmt.get('format_id', '?')}")
+    return templates[name]
 
 
 def format_animation_only(fmt: dict) -> bool:

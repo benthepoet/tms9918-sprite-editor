@@ -9,6 +9,18 @@ def default_sprite_name(index: int) -> str:
     return f"SPR{index}"
 
 
+def default_animation_name(index: int) -> str:
+    return f"ANIM{index}"
+
+
+def next_default_animation_name(animations: list) -> str:
+    existing = {anim["name"].lower() for anim in animations}
+    index = 0
+    while default_animation_name(index).lower() in existing:
+        index += 1
+    return default_animation_name(index)
+
+
 def sprite_display_name(sprite: dict, index: int) -> str:
     name = str(sprite.get("name", "")).strip()
     return name if name else default_sprite_name(index)

@@ -8,7 +8,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import tkinter as tk
 from tkinter import simpledialog
 
-from asm_format_schema import load_format_by_id
 from sprite import SpriteEditor
 from test_animation import make_frame
 
@@ -32,19 +31,23 @@ class AsmExportTests(unittest.TestCase):
         self.assertIn("; Sprite 00 8x8 Color", asm)
         self.assertIn("    BYTE >80", asm)
 
-    def test_build_animation_asm_includes_timing_and_stacked_slots_only(self):
+    def test_build_animation_asm_includes_frame_directory_and_stacked_slots_only(self):
         frame = make_frame(slots=2, duration=4)
         frame["stack_mask"] = [True, False]
         self.editor.animations = [
             {"name": "walk", "loop": True, "frames": [frame, make_frame(duration=8)]}
         ]
         asm = self.editor.build_animation_asm(0)
-        self.assertIn("; Animation: walk", asm)
-        self.assertIn("WALK_F00:", asm)
-        self.assertIn("WALK_DUR:", asm)
-        self.assertIn("Total cycle: 12 screen frames", asm)
-        self.assertEqual(asm.count("; Sprite 00"), 2)
-        self.assertNotIn("; Sprite 01", asm)
+        self.assertIn("WALK", asm)
+        self.assertIn("    BYTE >02    ; Frame count", asm)
+        self.assertIn("    DATA WALK_SPR0_F00,>0004 ; Frame 0 address and duration", asm)
+        self.assertIn("    DATA WALK_SPR0_F01,>0008 ; Frame 1 address and duration", asm)
+        sprite_labels = [
+            line for line in asm.splitlines() if line.startswith("WALK_SPR")
+        ]
+        self.assertEqual(sprite_labels, ["WALK_SPR0_F00", "WALK_SPR0_F01"])
+        self.assertNotIn("SPR1", asm)
+        self.assertNotIn("WALK_DUR:", asm)
 
     def test_build_animation_asm_includes_all_stacked_sprites_per_frame(self):
         frame = make_frame(slots=2, duration=4)
@@ -54,11 +57,11 @@ class AsmExportTests(unittest.TestCase):
             {"name": "stacked", "loop": True, "frames": [frame]}
         ]
         asm = self.editor.build_animation_asm(0)
-        self.assertIn("SPR0", asm)
-        self.assertIn("SPR1", asm)
-        self.assertIn("; Sprite 01", asm)
+        self.assertIn("STACKED_SPR0_F00", asm)
+        self.assertIn("STACKED_SPR1_F00", asm)
+        self.assertIn("    DATA STACKED_SPR0_F00,>0004 ; Frame 0 address and duration", asm)
 
-    def test_panel_text_includes_all_stacked_sprites_in_frame_edit(self):
+    def test_panel_text_shows_full_animation_in_frame_edit(self):
         frame = make_frame(slots=2, duration=6)
         frame["stack_mask"] = [True, True]
         frame["sprites"][1]["pattern"][1][1] = 1
@@ -68,11 +71,13 @@ class AsmExportTests(unittest.TestCase):
         self.editor.current_animation = 0
         self.editor.select_anim_frame(0)
         text = self.editor._build_asm_panel_text()
-        self.assertIn("; Animation 'walk' / Frame 0", text)
-        self.assertIn("SPR0", text)
-        self.assertIn("SPR1", text)
+        self.assertIn("WALK", text)
+        self.assertIn("    BYTE >01    ; Frame count", text)
+        self.assertIn("    DATA WALK_SPR0_F00,>0006 ; Frame 0 address and duration", text)
+        self.assertIn("WALK_SPR0_F00", text)
+        self.assertIn("WALK_SPR1_F00", text)
 
-    def test_panel_text_includes_all_stacked_sprites_in_preview(self):
+    def test_panel_text_shows_full_animation_in_preview(self):
         frame = make_frame(slots=2, duration=4)
         frame["stack_mask"] = [True, True]
         self.editor.animations = [
@@ -82,9 +87,9 @@ class AsmExportTests(unittest.TestCase):
         self.editor.anim_preview_running = True
         self.editor._anim_preview_index = 0
         text = self.editor._build_asm_panel_text()
-        self.assertTrue(text.startswith("; Preview frame 1/1\n"))
-        self.assertIn("SPR0", text)
-        self.assertIn("SPR1", text)
+        self.assertEqual(text, self.editor.build_animation_asm(0))
+        self.assertIn("WALK_SPR0_F00", text)
+        self.assertIn("WALK_SPR1_F00", text)
 
     def test_panel_text_omits_animation_header_in_static_mode(self):
         self.editor.current_animation = 0
@@ -104,36 +109,18 @@ class AsmExportTests(unittest.TestCase):
         asm = editor.asm_text.get("1.0", "end-1c")
         self.assertIn("HERO", asm)
 
-    def test_frame_directory_format_hidden_in_static_mode(self):
-        self.editor._export_format_id = "ti99_frame_directory"
-        self.editor._export_format = load_format_by_id("ti99_frame_directory")
-        self.editor._refresh_asm_format_options()
-        visible_ids = {
-            format_id for format_id, _fmt in self.editor._visible_export_formats()
-        }
-        self.assertNotIn("ti99_frame_directory", visible_ids)
-        self.assertEqual(self.editor._export_format_id, "ti99_default")
-
-    def test_frame_directory_format_visible_in_frame_edit(self):
-        self.editor.animations = [
-            {"name": "walk", "loop": True, "frames": [make_frame()]}
-        ]
-        self.editor.current_animation = 0
-        self.editor.select_anim_frame(0)
-        visible_ids = {
-            format_id for format_id, _fmt in self.editor._visible_export_formats()
-        }
-        self.assertIn("ti99_frame_directory", visible_ids)
-
-    def test_panel_text_adds_preview_header(self):
+    def test_panel_text_includes_all_frames_during_preview(self):
         self.editor.current_animation = 0
         self.editor.animations = [
-            {"name": "idle", "loop": True, "frames": [make_frame(), make_frame()]}
+            {"name": "idle", "loop": True, "frames": [make_frame(), make_frame(duration=8)]}
         ]
         self.editor.anim_preview_running = True
         self.editor._anim_preview_index = 1
         text = self.editor._build_asm_panel_text()
-        self.assertTrue(text.startswith("; Preview frame 2/2\n"))
+        self.assertIn("IDLE", text)
+        self.assertIn("    BYTE >02    ; Frame count", text)
+        self.assertIn("    DATA IDLE_SPR0_F00,>0004 ; Frame 0 address and duration", text)
+        self.assertIn("    DATA IDLE_SPR0_F01,>0008 ; Frame 1 address and duration", text)
 
 
 if __name__ == "__main__":
