@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -30,6 +31,35 @@ class FrameEditTests(unittest.TestCase):
         self.editor.select_anim_frame(0)
         self.assertTrue(self.editor.anim_edit_mode)
         self.assertIsNotNone(self.editor._frame_edit_snapshot)
+
+    def test_frame_edit_disables_stack_checkboxes_and_forces_stacked(self):
+        editor = SpriteEditor(self.root, create_ui=True)
+        editor.sprite_size_mode = 8
+        editor.init_sprites(2)
+        editor.stack_vars = [
+            tk.BooleanVar(value=True),
+            tk.BooleanVar(value=False),
+        ]
+        editor.animations = [
+            {
+                "name": "walk",
+                "loop": True,
+                "frames": [make_frame(size=8, slots=2)],
+            }
+        ]
+        editor.animations[0]["frames"][0]["stack_mask"] = [True, False]
+        editor.current_animation = 0
+        editor.select_anim_frame(0)
+        checkboxes = [
+            child
+            for row in editor._sprite_slot_rows
+            for child in row.winfo_children()
+            if isinstance(child, tk.Checkbutton)
+        ]
+        self.assertEqual(len(checkboxes), 2)
+        for checkbox in checkboxes:
+            self.assertEqual(str(checkbox.cget("state")), "disabled")
+        self.assertEqual(editor._frame_edit_snapshot["stack_mask"], [True, True])
 
     def test_commit_on_frame_switch(self):
         self.editor.select_anim_frame(0)
@@ -84,17 +114,17 @@ class FrameEditTests(unittest.TestCase):
         self.assertEqual(len(self.editor.animations[0]["frames"]), 3)
         self.assertTrue(self.editor.anim_edit_mode)
 
-    def test_capture_frame_copies_stacked_and_active_sprites(self):
+    def test_capture_frame_copies_only_stacked_sprites(self):
         self.editor.init_sprites(3)
         self.editor.stack_vars = [
             tk.BooleanVar(value=True),
-            tk.BooleanVar(value=False),
+            tk.BooleanVar(value=True),
             tk.BooleanVar(value=False),
         ]
         self.editor.sprites[0]["pattern"][0][0] = 1
         self.editor.sprites[1]["pattern"][1][1] = 1
         self.editor.sprites[2]["pattern"][2][2] = 1
-        self.editor.current_sprite = 1
+        self.editor.current_sprite = 2
         self.editor.add_anim_frame()
         frame = self.editor.animations[0]["frames"][-1]
         self.assertEqual(len(frame["sprites"]), 2)
@@ -102,7 +132,8 @@ class FrameEditTests(unittest.TestCase):
         self.assertEqual(frame["sprites"][1]["pattern"][1][1], 1)
         self.assertEqual(frame["stack_mask"], [True, True])
 
-    def test_capture_frame_includes_active_sprite_when_not_stacked(self):
+    @patch("sprite.messagebox.showerror")
+    def test_capture_frame_requires_stacked_sprite(self, showerror):
         self.editor.init_sprites(3)
         self.editor.stack_vars = [
             tk.BooleanVar(value=False),
@@ -111,10 +142,10 @@ class FrameEditTests(unittest.TestCase):
         ]
         self.editor.sprites[2]["pattern"][2][2] = 1
         self.editor.current_sprite = 2
+        initial_frames = len(self.editor.animations[0]["frames"])
         self.editor.add_anim_frame()
-        frame = self.editor.animations[0]["frames"][-1]
-        self.assertEqual(len(frame["sprites"]), 1)
-        self.assertEqual(frame["sprites"][0]["pattern"][2][2], 1)
+        showerror.assert_called_once()
+        self.assertEqual(len(self.editor.animations[0]["frames"]), initial_frames)
 
     def test_capture_frame_does_not_recurse_with_ui(self):
         editor = SpriteEditor(self.root, create_ui=True)

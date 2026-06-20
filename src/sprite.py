@@ -961,9 +961,14 @@ class SpriteEditor:
         if self.current_sprite >= slot_count:
             self.current_sprite = max(0, slot_count - 1)
 
+        in_frame_edit = (
+            source == "frame" and self._frame_edit_snapshot is not None
+        )
         normal_bg, _selected_bg = self._sprite_slot_colors()
         for i in range(slot_count):
-            if source == "frame" and mask is not None:
+            if in_frame_edit:
+                stacked = True
+            elif source == "frame" and mask is not None:
                 stacked = mask[i] if i < len(mask) else False
             elif source == "static" and self._static_stack_mask and i < len(
                 self._static_stack_mask
@@ -1001,6 +1006,8 @@ class SpriteEditor:
                 cursor="hand2",
             )
             cb.pack(side=tk.RIGHT, padx=(4, 8))
+            if in_frame_edit:
+                cb.config(state=tk.DISABLED)
             for widget in (row, name):
                 widget.bind(
                     "<Button-1>",
@@ -1012,6 +1019,9 @@ class SpriteEditor:
             )
             self.stack_vars.append(var)
             self._sprite_slot_rows.append(row)
+
+        if in_frame_edit:
+            self._ensure_frame_sprites_stacked()
 
         self.root.after_idle(self._update_sprite_slots_scroll_region)
         if slot_count:
@@ -1039,18 +1049,26 @@ class SpriteEditor:
             return "frame", self._frame_edit_snapshot["stack_mask"]
         return "static", None
 
+    def _ensure_frame_sprites_stacked(self) -> None:
+        if self._frame_edit_snapshot is None:
+            return
+        sprites = self._frame_edit_snapshot.get("sprites", [])
+        self._frame_edit_snapshot["stack_mask"] = [True] * len(sprites)
+
     def _normalize_frame_for_edit(self, frame: dict) -> dict:
         anim = self._current_animation()
         target = 1
         if anim is not None:
             target = max(animation_frame_slot_count(anim), 1)
-        return normalize_frame_slots(
+        normalized = normalize_frame_slots(
             deep_copy_frame(frame),
             target,
             self.sprite_size_mode,
             self.current_color,
             stack_padded=True,
         )
+        normalized["stack_mask"] = [True] * len(normalized["sprites"])
+        return normalized
 
     def _pad_other_animation_frames(self, target_count: int) -> None:
         anim = self._current_animation()
@@ -1430,18 +1448,14 @@ class SpriteEditor:
         self._refresh_animation_ui()
 
     def _on_stack_checkbox_changed(self):
-        if self.anim_preview_running:
+        if self.anim_preview_running or self.anim_edit_mode:
             return
-        if self.anim_edit_mode and self._frame_edit_snapshot is not None:
-            self._frame_edit_snapshot["stack_mask"] = [v.get() for v in self.stack_vars]
         self.refresh_views()
 
     def _capture_stack_mask(self):
         mask = [v.get() for v in self.stack_vars]
         while len(mask) < len(self.sprites):
             mask.append(False)
-        if 0 <= self.current_sprite < len(mask):
-            mask[self.current_sprite] = True
         return mask
 
     def _capture_sprites_for_frame(self, sprites, stack_mask):
@@ -1450,6 +1464,11 @@ class SpriteEditor:
             if index < len(stack_mask) and stack_mask[index]:
                 captured.append(deep_copy_sprite(sprite))
         return captured
+
+    def _has_stacked_sprites_for_capture(self) -> bool:
+        if self.anim_edit_mode and self._frame_edit_snapshot is not None:
+            return any(self._frame_edit_snapshot.get("stack_mask", []))
+        return any(self._capture_stack_mask())
 
     def _capture_current_state_as_frame(self, duration=4):
         if self.anim_edit_mode and self._frame_edit_snapshot is not None:
@@ -1461,14 +1480,6 @@ class SpriteEditor:
             captured_sprites = self._capture_sprites_for_frame(
                 self.sprites, stack_mask
             )
-        if not captured_sprites:
-            captured_sprites = [
-                create_empty_sprite_dict(
-                    self.sprite_size_mode,
-                    self.current_color,
-                    default_sprite_name(0),
-                )
-            ]
         return {
             "duration": duration,
             "stack_enabled": True,
@@ -1559,6 +1570,12 @@ class SpriteEditor:
             messagebox.showinfo(
                 "Capture Frame",
                 f"Maximum of {MAX_FRAMES_PER_ANIM} frames per animation.",
+            )
+            return
+        if not self._has_stacked_sprites_for_capture():
+            messagebox.showerror(
+                "Capture Frame",
+                "Stack at least one sprite before capturing a frame.",
             )
             return
         duration = self.anim_duration_var.get() if hasattr(self, "anim_duration_var") else 4
