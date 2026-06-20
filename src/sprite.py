@@ -134,6 +134,8 @@ class SpriteEditor:
             self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
             self.root.bind("<Control-Shift-C>", self._copy_asm_shortcut)
             self.root.bind("<Control-Shift-F>", self._capture_frame_shortcut)
+            self.root.bind("<Control-q>", self._on_window_close)
+            self.root.bind("<Control-Q>", self._on_window_close)
             self.root.bind("<Escape>", self._on_escape)
             self.root.bind("<space>", self._toggle_preview_shortcut)
     
@@ -191,6 +193,12 @@ class SpriteEditor:
         file_menu.add_command(label="New", command=self.new_project)
         file_menu.add_command(label="Load Project", command=self.load_project)
         file_menu.add_command(label="Save Project", command=self.save_project)
+        file_menu.add_separator()
+        file_menu.add_command(
+            label="Quit",
+            command=self._on_window_close,
+            accelerator="Ctrl+Q",
+        )
 
         anim_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Animation", menu=anim_menu)
@@ -1391,7 +1399,7 @@ class SpriteEditor:
             else tk.DISABLED
         )
 
-    def _on_window_close(self):
+    def _on_window_close(self, event=None):
         self.stop_anim_preview()
         self.root.destroy()
 
