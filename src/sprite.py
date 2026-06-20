@@ -1428,6 +1428,14 @@ class SpriteEditor:
             self._frame_edit_snapshot["stack_mask"] = [v.get() for v in self.stack_vars]
         self.refresh_views()
 
+    def _capture_stack_mask(self):
+        mask = [v.get() for v in self.stack_vars]
+        while len(mask) < len(self.sprites):
+            mask.append(False)
+        if 0 <= self.current_sprite < len(mask):
+            mask[self.current_sprite] = True
+        return mask
+
     def _capture_sprites_for_frame(self, sprites, stack_mask):
         captured = []
         for index, sprite in enumerate(sprites):
@@ -1441,13 +1449,10 @@ class SpriteEditor:
             sprites = self._frame_edit_snapshot["sprites"]
             captured_sprites = self._capture_sprites_for_frame(sprites, stack_mask)
         else:
-            index = self.current_sprite
-            if 0 <= index < len(self.sprites):
-                captured = deep_copy_sprite(self.sprites[index])
-                captured["name"] = default_sprite_name(0)
-                captured_sprites = [captured]
-            else:
-                captured_sprites = []
+            stack_mask = self._capture_stack_mask()
+            captured_sprites = self._capture_sprites_for_frame(
+                self.sprites, stack_mask
+            )
         if not captured_sprites:
             captured_sprites = [
                 create_empty_sprite_dict(

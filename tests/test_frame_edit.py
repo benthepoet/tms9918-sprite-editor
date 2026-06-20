@@ -84,11 +84,11 @@ class FrameEditTests(unittest.TestCase):
         self.assertEqual(len(self.editor.animations[0]["frames"]), 3)
         self.assertTrue(self.editor.anim_edit_mode)
 
-    def test_capture_frame_only_copies_current_sprite(self):
+    def test_capture_frame_copies_stacked_and_active_sprites(self):
         self.editor.init_sprites(3)
         self.editor.stack_vars = [
             tk.BooleanVar(value=True),
-            tk.BooleanVar(value=True),
+            tk.BooleanVar(value=False),
             tk.BooleanVar(value=False),
         ]
         self.editor.sprites[0]["pattern"][0][0] = 1
@@ -97,9 +97,24 @@ class FrameEditTests(unittest.TestCase):
         self.editor.current_sprite = 1
         self.editor.add_anim_frame()
         frame = self.editor.animations[0]["frames"][-1]
+        self.assertEqual(len(frame["sprites"]), 2)
+        self.assertEqual(frame["sprites"][0]["pattern"][0][0], 1)
+        self.assertEqual(frame["sprites"][1]["pattern"][1][1], 1)
+        self.assertEqual(frame["stack_mask"], [True, True])
+
+    def test_capture_frame_includes_active_sprite_when_not_stacked(self):
+        self.editor.init_sprites(3)
+        self.editor.stack_vars = [
+            tk.BooleanVar(value=False),
+            tk.BooleanVar(value=False),
+            tk.BooleanVar(value=False),
+        ]
+        self.editor.sprites[2]["pattern"][2][2] = 1
+        self.editor.current_sprite = 2
+        self.editor.add_anim_frame()
+        frame = self.editor.animations[0]["frames"][-1]
         self.assertEqual(len(frame["sprites"]), 1)
-        self.assertEqual(frame["sprites"][0]["pattern"][1][1], 1)
-        self.assertEqual(frame["stack_mask"], [True])
+        self.assertEqual(frame["sprites"][0]["pattern"][2][2], 1)
 
     def test_capture_frame_does_not_recurse_with_ui(self):
         editor = SpriteEditor(self.root, create_ui=True)

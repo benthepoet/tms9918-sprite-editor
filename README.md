@@ -72,7 +72,7 @@ Frame edit and preview modes use a warm light background; the assembly panel and
 
 1. Click **+** in the Animations panel to create an animation (defaults to `ANIM0`, `ANIM1`, …).
 2. Select the sprite you want in the frame, draw on the canvas, and use stack checkboxes as needed.
-3. Click **+ Frame** or press `Ctrl+Shift+F` to capture **only the currently selected sprite** into a new frame.
+3. Click **+ Frame** or press `Ctrl+Shift+F` to capture the **active sprite and all stacked sprites** into a new frame.
 4. Click a frame in the list to edit it. Use **Commit Frame** / **Discard Changes** to save or revert edits.
 5. Set **Duration (sf)** per frame — hold time in VDP screen frames (1–255). **Loop** controls whether preview repeats.
 6. Press **▶ Play** or `Space` to preview on the main canvas.
@@ -281,7 +281,7 @@ Stacking is always available. Check the **Stack** box next to each sprite to inc
 
 Stack draw order follows the sprite list order — use ↑↓ to reorder.
 
-In **static edit**, capturing a frame copies only the **currently selected** sprite (always stored as slot 0 in the new frame). Stack checkboxes on other project sprites do not add extra slots to the capture.
+In **static edit**, capturing a frame copies every **stacked** project sprite plus the **active** sprite (even if its stack box is unchecked). Unchecked, non-active sprites are omitted.
 
 In **frame edit**, the sprite list shows that frame's slots. Adding or removing a sprite updates every other frame in the animation to keep slot counts aligned. Padded slots on other frames are empty and stacked by default. Commit saves the current frame; discard reverts it and removes auto-padded slots from other frames.
 
